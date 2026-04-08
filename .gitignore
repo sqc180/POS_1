@@ -2,8 +2,10 @@ node_modules
 dist
 .next
 .turbo
-!.env
-!.env.local
+.env
+.env.local
+.env.*.local
+!.env.example
 *.log
 .DS_Store
 storage

@@ -1,0 +1,45 @@
+# Web — Next.js `next start` (monorepo root as build context; avoids Windows symlink issues with standalone)
+FROM node:20-bookworm-slim AS build
+ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
+ARG NEXT_PUBLIC_APP_NAME=POS ERP
+ARG NEXT_PUBLIC_ENV_NAME=local
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_APP_NAME=$NEXT_PUBLIC_APP_NAME
+ENV NEXT_PUBLIC_ENV_NAME=$NEXT_PUBLIC_ENV_NAME
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/web/package.json ./apps/web/
+COPY apps/api/package.json ./apps/api/
+COPY packages ./packages
+
+RUN pnpm install --frozen-lockfile
+
+COPY apps/web ./apps/web
+
+RUN pnpm exec turbo run build --filter=@repo/web
+RUN pnpm prune --prod
+
+FROM node:20-bookworm-slim AS runner
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+ENV NODE_ENV=production
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+WORKDIR /app
+COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/turbo.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps ./apps
+COPY --from=build /app/packages ./packages
+
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
+USER nextjs
+ENV HOME=/tmp
+WORKDIR /app
+EXPOSE 3000
+CMD ["pnpm", "--filter", "@repo/web", "exec", "next", "start", "-H", "0.0.0.0", "-p", "3000"]

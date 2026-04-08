@@ -1,4 +1,7 @@
+import { mkdir, writeFile, unlink } from "fs/promises"
+import { join } from "path"
 import type { FastifyInstance } from "fastify"
+import mongoose from "mongoose"
 import { z } from "zod"
 import type { ApiEnv } from "@repo/config"
 import { Permission, hasPermission } from "@repo/permissions"
@@ -19,7 +22,7 @@ import { stockService } from "../services/stock.service.js"
 import { supplierService } from "../services/supplier.service.js"
 import { permissionForDocumentType } from "../lib/document-permission.js"
 import { resolveStorageRoot } from "../lib/storage-root.js"
-import { createLocalFilesystemProvider } from "../storage/local-filesystem.provider.js"
+import { createStorageFromEnv } from "../storage/factory.js"
 import { createStoredDocumentService } from "../services/stored-document.service.js"
 import { gatewayService } from "../services/gateway.service.js"
 import { invoiceService } from "../services/invoice.service.js"
@@ -71,8 +74,10 @@ const loginSchema = z.object({
 
 export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
   const requireAuth = createRequireAuth(env)
-  const storage = createLocalFilesystemProvider(resolveStorageRoot(env))
-  const storedDocumentService = createStoredDocumentService(storage)
+  const storage = createStorageFromEnv(env)
+  const storedDocumentService = createStoredDocumentService(storage, {
+    pdfPathPrefix: env.PDF_STORAGE_PATH,
+  })
 
   await app.register(
     async (whApp) => {
@@ -98,7 +103,32 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
     { prefix: "/webhooks" },
   )
 
-  app.get("/health", async () => ({ ok: true }))
+  app.get("/health", async () => ({ ok: true, liveness: "up" }))
+
+  /** Readiness: MongoDB ping + local storage root writable (when STORAGE_PROVIDER=local). */
+  app.get("/ready", async (_req, reply) => {
+    try {
+      if (mongoose.connection.readyState !== 1) {
+        return reply.status(503).send({ ok: false, checks: { mongodb: "disconnected" } })
+      }
+      await mongoose.connection.db?.admin().command({ ping: 1 })
+
+      if (env.STORAGE_PROVIDER === "local") {
+        const root = resolveStorageRoot(env)
+        const probeDir = join(root, ".ready-probe")
+        await mkdir(probeDir, { recursive: true })
+        const probeFile = join(probeDir, "ping.tmp")
+        await writeFile(probeFile, `${Date.now()}`, "utf8")
+        await unlink(probeFile)
+      }
+
+      return { ok: true, checks: { mongodb: "ok", storage: env.STORAGE_PROVIDER === "local" ? "writable" : "skipped" } }
+    } catch {
+      return reply.status(503).send({ ok: false, checks: { readiness: "failed" } })
+    }
+  })
+
+  // Future: @fastify/rate-limit on auth, /webhooks, and heavy document routes (see docs/DEPLOYMENT.md).
 
   app.post("/auth/onboarding", async (request, reply) => {
     const parsed = onboardingSchema.safeParse(request.body)

@@ -1,0 +1,37 @@
+# API — monorepo root as build context
+FROM node:20-bookworm-slim AS build
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/web/package.json ./apps/web/
+COPY apps/api/package.json ./apps/api/
+COPY packages ./packages
+
+RUN pnpm install --frozen-lockfile
+
+COPY apps/api ./apps/api
+
+RUN pnpm exec turbo run build --filter=@repo/api
+RUN pnpm prune --prod
+
+FROM node:20-bookworm-slim AS runner
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+ENV NODE_ENV=production
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+WORKDIR /app
+COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/turbo.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps ./apps
+COPY --from=build /app/packages ./packages
+
+# Run as root by default so bind mounts/volumes for STORAGE_ROOT_PATH remain writable.
+# For locked-down hosts, set `user` in compose/Kubernetes and `chown` the volume to match.
+WORKDIR /app
+EXPOSE 4000
+ENV HOST=0.0.0.0
+CMD ["node", "apps/api/dist/index.js"]

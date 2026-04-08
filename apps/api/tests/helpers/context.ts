@@ -4,6 +4,7 @@ import mongoose from "mongoose"
 import type { ApiEnv } from "@repo/config"
 import { createApp } from "../../src/app.js"
 import { connectDb } from "../../src/db/connect.js"
+import { resolveStorageRoot } from "../../src/lib/storage-root.js"
 import { makeTestEnv } from "./env.js"
 
 export type TestAppContext = {
@@ -19,7 +20,7 @@ export const openTestApp = async (): Promise<TestAppContext & { close: () => Pro
   const env = makeTestEnv()
   await connectDb(env)
   const app = await createApp(env, { logger: false })
-  const storageRoot = env.STORAGE_ROOT ?? ""
+  const storageRoot = resolveStorageRoot(env)
 
   const close = async () => {
     await app.close()

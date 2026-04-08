@@ -106,7 +106,7 @@ export default function LoginPage() {
     if (!res.success) {
       const hint =
         res.error.code === "network_error"
-          ? " Check that the API is running and NEXT_PUBLIC_API_URL in .env matches its URL."
+          ? " Check that the API is running and NEXT_PUBLIC_API_BASE_URL (or NEXT_PUBLIC_API_URL) in .env matches its URL."
           : ""
       setError(`${res.error.message}${hint}`)
       setShowSignInHints(res.error.code === "invalid_credentials")

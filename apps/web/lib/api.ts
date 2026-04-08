@@ -1,6 +1,9 @@
 import { getToken } from "./auth-storage"
 
-const base = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"
+const base = () =>
+  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+  process.env.NEXT_PUBLIC_API_URL?.trim() ||
+  "http://localhost:4000"
 
 export type ApiResult<T> = { success: true; data: T } | { success: false; error: { code: string; message: string } }
 

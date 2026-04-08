@@ -40,7 +40,16 @@ const isDupKey = (e: unknown): boolean => {
 
 type DocFolder = "invoices" | "receipts" | "refunds"
 
-export const createStoredDocumentService = (storage: StorageProvider) => {
+export type StoredDocumentServiceOptions = {
+  /** Optional prefix under storage root (e.g. PDF_STORAGE_PATH). */
+  pdfPathPrefix?: string
+}
+
+export const createStoredDocumentService = (
+  storage: StorageProvider,
+  opts: StoredDocumentServiceOptions = {},
+) => {
+  const pdfPrefix = opts.pdfPathPrefix?.trim() || undefined
   const persistNewAsset = async (input: {
     tenantId: string
     actorId: string
@@ -57,7 +66,7 @@ export const createStoredDocumentService = (storage: StorageProvider) => {
   }): Promise<FileAssetDoc> => {
     const checksumSha256 = createHash("sha256").update(input.buffer).digest("hex")
     const storedFileName = `${randomUUID()}.${input.extension}`
-    const relativePath = buildDocumentRelativePath(input.tenantId, input.folder, storedFileName)
+    const relativePath = buildDocumentRelativePath(input.tenantId, input.folder, storedFileName, pdfPrefix)
     await storage.saveFile({
       relativePath,
       buffer: input.buffer,

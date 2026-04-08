@@ -18,7 +18,16 @@ describe("health + auth", () => {
   it("GET /health returns ok", async () => {
     const res = await ctx.app.inject({ method: "GET", url: "/health" })
     expect(res.statusCode).toBe(200)
-    expect(parseJson(res.body)).toEqual({ ok: true })
+    expect(parseJson(res.body)).toEqual({ ok: true, liveness: "up" })
+  })
+
+  it("GET /ready returns ok when db and storage are reachable", async () => {
+    const res = await ctx.app.inject({ method: "GET", url: "/ready" })
+    expect(res.statusCode).toBe(200)
+    const body = parseJson(res.body) as { ok: boolean; checks?: Record<string, string> }
+    expect(body.ok).toBe(true)
+    expect(body.checks?.mongodb).toBe("ok")
+    expect(body.checks?.storage).toBe("writable")
   })
 
   it("POST /auth/onboarding creates tenant and returns token", async () => {

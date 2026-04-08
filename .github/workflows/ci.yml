@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Test API
+        run: pnpm run test
+
+      - name: Build
+        run: pnpm run build
+
+      # Enable when you are ready to push images from CI:
+      # - name: Docker build API
+      #   run: docker build -f Dockerfile.api -t pos-api:ci .
+      #
+      # - name: Docker build Web
+      #   run: docker build -f Dockerfile.web -t pos-web:ci --build-arg NEXT_PUBLIC_API_BASE_URL=http://localhost:4000 .
