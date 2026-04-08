@@ -1,0 +1,302 @@
+import mongoose from "mongoose"
+import { BusinessSettingsModel } from "../models/business-settings.model.js"
+import { InvoiceModel, type InvoiceDoc } from "../models/invoice.model.js"
+import { ProductModel } from "../models/product.model.js"
+import { auditService } from "./audit.service.js"
+import { numberingService } from "./numbering.service.js"
+import { stockService } from "./stock.service.js"
+import { taxService, type BuiltLine } from "./tax.service.js"
+
+const toPublic = (inv: InvoiceDoc) => ({
+  id: inv._id.toString(),
+  tenantId: inv.tenantId.toString(),
+  invoiceNumber: inv.invoiceNumber ?? "",
+  status: inv.status,
+  customerId: inv.customerId?.toString() ?? null,
+  cashierId: inv.cashierId.toString(),
+  items: inv.items.map((i) => ({
+    productId: i.productId.toString(),
+    name: i.name,
+    sku: i.sku,
+    qty: i.qty,
+    unitPrice: i.unitPrice,
+    taxMode: i.taxMode,
+    gstSlabId: i.gstSlabId?.toString() ?? null,
+    cgstRate: i.cgstRate,
+    sgstRate: i.sgstRate,
+    igstRate: i.igstRate,
+    taxableValue: i.taxableValue,
+    cgstAmount: i.cgstAmount,
+    sgstAmount: i.sgstAmount,
+    igstAmount: i.igstAmount,
+    lineTotal: i.lineTotal,
+  })),
+  subtotal: inv.subtotal,
+  cgstTotal: inv.cgstTotal,
+  sgstTotal: inv.sgstTotal,
+  igstTotal: inv.igstTotal,
+  grandTotal: inv.grandTotal,
+  amountPaid: inv.amountPaid,
+  notes: inv.notes ?? "",
+  receiptIssued: inv.receiptIssued ?? false,
+  cancelledAt: inv.cancelledAt?.toISOString() ?? null,
+  cancelReason: inv.cancelReason ?? "",
+  createdAt: inv.createdAt?.toISOString?.() ?? "",
+  updatedAt: inv.updatedAt?.toISOString?.() ?? "",
+})
+
+const persistLines = (built: BuiltLine[]) =>
+  built.map((l) => ({
+    productId: l.productId,
+    name: l.name,
+    sku: l.sku,
+    qty: l.qty,
+    unitPrice: l.unitPrice,
+    taxMode: l.taxMode,
+    gstSlabId: l.gstSlabId,
+    cgstRate: l.cgstRate,
+    sgstRate: l.sgstRate,
+    igstRate: l.igstRate,
+    taxableValue: l.taxableValue,
+    cgstAmount: l.cgstAmount,
+    sgstAmount: l.sgstAmount,
+    igstAmount: l.igstAmount,
+    lineTotal: l.lineTotal,
+  }))
+
+export const invoiceService = {
+  toPublic,
+
+  async list(tenantId: string, status?: string) {
+    const q: Record<string, unknown> = { tenantId: new mongoose.Types.ObjectId(tenantId) }
+    if (status) q.status = status
+    const rows = await InvoiceModel.find(q).sort({ createdAt: -1 }).limit(200)
+    return rows.map(toPublic)
+  },
+
+  async getById(tenantId: string, id: string) {
+    if (!mongoose.Types.ObjectId.isValid(id)) return null
+    const inv = await InvoiceModel.findOne({
+      _id: new mongoose.Types.ObjectId(id),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+    })
+    return inv ? toPublic(inv) : null
+  },
+
+  async createDraft(
+    tenantId: string,
+    actorId: string,
+    input: { customerId?: string; lines: { productId: string; qty: number }[]; notes?: string },
+  ) {
+    const { lines: built } = await taxService.buildLinesFromProducts(tenantId, input.lines)
+    const sums = taxService.summarize(built)
+    const inv = await InvoiceModel.create({
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+      status: "draft",
+      customerId:
+        input.customerId && mongoose.Types.ObjectId.isValid(input.customerId)
+          ? new mongoose.Types.ObjectId(input.customerId)
+          : undefined,
+      cashierId: new mongoose.Types.ObjectId(actorId),
+      items: persistLines(built),
+      ...sums,
+      amountPaid: 0,
+      notes: input.notes ?? "",
+    })
+    await auditService.log({
+      tenantId,
+      actorId,
+      action: "invoice.create",
+      entity: "Invoice",
+      entityId: inv._id.toString(),
+      metadata: { status: "draft" },
+    })
+    return toPublic(inv)
+  },
+
+  async updateDraft(
+    tenantId: string,
+    actorId: string,
+    id: string,
+    input: { customerId?: string | null; lines?: { productId: string; qty: number }[]; notes?: string },
+  ) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      const err = new Error("Invalid invoice")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const inv = await InvoiceModel.findOne({
+      _id: new mongoose.Types.ObjectId(id),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+    })
+    if (!inv || inv.status !== "draft") {
+      const err = new Error("Invoice not editable")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    if (input.customerId !== undefined) {
+      inv.customerId =
+        input.customerId && mongoose.Types.ObjectId.isValid(input.customerId)
+          ? new mongoose.Types.ObjectId(input.customerId)
+          : undefined
+    }
+    if (input.notes !== undefined) inv.notes = input.notes
+    if (input.lines) {
+      const { lines: built } = await taxService.buildLinesFromProducts(tenantId, input.lines)
+      const sums = taxService.summarize(built)
+      inv.items = persistLines(built) as typeof inv.items
+      inv.subtotal = sums.subtotal
+      inv.cgstTotal = sums.cgstTotal
+      inv.sgstTotal = sums.sgstTotal
+      inv.igstTotal = sums.igstTotal
+      inv.grandTotal = sums.grandTotal
+    }
+    await inv.save()
+    await auditService.log({
+      tenantId,
+      actorId,
+      action: "invoice.update_draft",
+      entity: "Invoice",
+      entityId: inv._id.toString(),
+    })
+    return toPublic(inv)
+  },
+
+  async complete(tenantId: string, actorId: string, id: string) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      const err = new Error("Invalid invoice")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const inv = await InvoiceModel.findOne({
+      _id: new mongoose.Types.ObjectId(id),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+    })
+    if (!inv || inv.status !== "draft") {
+      const err = new Error("Invoice cannot be completed")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    const settings = await BusinessSettingsModel.findOne({ tenantId: new mongoose.Types.ObjectId(tenantId) })
+    const branchId = settings?.defaultBranchId ?? "main"
+    const lineInputs = inv.items.map((i) => ({ productId: i.productId.toString(), qty: i.qty }))
+    const { lines: built } = await taxService.buildLinesFromProducts(tenantId, lineInputs)
+    const sums = taxService.summarize(built)
+    inv.items = persistLines(built) as typeof inv.items
+    inv.subtotal = sums.subtotal
+    inv.cgstTotal = sums.cgstTotal
+    inv.sgstTotal = sums.sgstTotal
+    inv.igstTotal = sums.igstTotal
+    inv.grandTotal = sums.grandTotal
+    const { number } = await numberingService.nextInvoiceNumber(tenantId)
+    inv.invoiceNumber = number
+    inv.status = "completed"
+    for (const line of inv.items) {
+      const p = await ProductModel.findById(line.productId)
+      if (p?.trackStock) {
+        await stockService.applyForProduct(
+          tenantId,
+          actorId,
+          line.productId.toString(),
+          branchId,
+          "out",
+          line.qty,
+          "invoice",
+          inv._id.toString(),
+        )
+      }
+    }
+    await inv.save()
+    await auditService.log({
+      tenantId,
+      actorId,
+      action: "invoice.complete",
+      entity: "Invoice",
+      entityId: inv._id.toString(),
+      metadata: { invoiceNumber: number, grandTotal: inv.grandTotal },
+    })
+    return toPublic(inv)
+  },
+
+  async cancel(tenantId: string, actorId: string, id: string, reason?: string) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      const err = new Error("Invalid invoice")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const inv = await InvoiceModel.findOne({
+      _id: new mongoose.Types.ObjectId(id),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+    })
+    if (!inv) {
+      const err = new Error("Not found")
+      ;(err as Error & { statusCode?: number }).statusCode = 404
+      throw err
+    }
+    if (inv.status === "cancelled") {
+      const err = new Error("Already cancelled")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    if (inv.status === "draft") {
+      inv.status = "cancelled"
+      inv.cancelledAt = new Date()
+      inv.cancelReason = reason ?? ""
+      await inv.save()
+      await auditService.log({
+        tenantId,
+        actorId,
+        action: "invoice.cancel",
+        entity: "Invoice",
+        entityId: inv._id.toString(),
+        metadata: { wasDraft: true },
+      })
+      return toPublic(inv)
+    }
+    if (inv.amountPaid > 0) {
+      const err = new Error("Cannot cancel invoice with payments; refund first")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    const settings = await BusinessSettingsModel.findOne({ tenantId: new mongoose.Types.ObjectId(tenantId) })
+    const branchId = settings?.defaultBranchId ?? "main"
+    for (const line of inv.items) {
+      const p = await ProductModel.findById(line.productId)
+      if (p?.trackStock) {
+        await stockService.applyForProduct(
+          tenantId,
+          actorId,
+          line.productId.toString(),
+          branchId,
+          "in",
+          line.qty,
+          "invoice_cancel",
+          inv._id.toString(),
+        )
+      }
+    }
+    inv.status = "cancelled"
+    inv.cancelledAt = new Date()
+    inv.cancelReason = reason ?? ""
+    await inv.save()
+    await auditService.log({
+      tenantId,
+      actorId,
+      action: "invoice.cancel",
+      entity: "Invoice",
+      entityId: inv._id.toString(),
+      metadata: { hadStockRestore: true },
+    })
+    return toPublic(inv)
+  },
+
+  async addAmountPaid(tenantId: string, invoiceId: string, delta: number) {
+    const inv = await InvoiceModel.findOne({
+      _id: new mongoose.Types.ObjectId(invoiceId),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+    })
+    if (!inv) return
+    inv.amountPaid = Math.round((inv.amountPaid + delta) * 100) / 100
+    await inv.save()
+  },
+}

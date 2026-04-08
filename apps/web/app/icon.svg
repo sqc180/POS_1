@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <title>POS</title>
+  <rect width="32" height="32" rx="8" fill="#0a0a0a" />
+  <rect x="6.5" y="7" width="19" height="13.5" rx="2" stroke="#fafafa" stroke-width="1.35" opacity="0.95" />
+  <path stroke="#fafafa" stroke-width="1.2" stroke-linecap="round" opacity="0.88" d="M9.5 12.5h7M9.5 15.5h5" />
+  <rect x="21" y="9" width="4" height="4" rx="0.75" fill="#fafafa" />
+  <path fill="#fafafa" opacity="0.45" d="M7 22.5h1.2v1.5H7zm2.4 0h1.2v1.5H9.4zm2.4 0h1.2v1.5h-1.2zm2.4 0h1.2v1.5h-1.2zm2.4 0h1.2v1.5h-1.2zm2.4 0h1.2v1.5h-1.2zm2.4 0h1.2v1.5h-1.2zm2.4 0h1.2v1.5h-1.2z" />
+</svg>
