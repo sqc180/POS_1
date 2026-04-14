@@ -28,6 +28,12 @@ export const productSerialService = {
       input.variantId && mongoose.Types.ObjectId.isValid(input.variantId)
         ? new mongoose.Types.ObjectId(input.variantId)
         : undefined
+    const dup = await ProductSerialModel.exists({ tenantId: tenantOid, serialNumber: sn })
+    if (dup) {
+      const err = new Error("Serial number already exists for this tenant")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
     const doc = await ProductSerialModel.create({
       tenantId: tenantOid,
       productId: new mongoose.Types.ObjectId(input.productId),

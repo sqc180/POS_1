@@ -47,6 +47,16 @@ const invoiceSchema = new Schema(
       enum: ["draft", "completed", "cancelled"],
       default: "draft",
     },
+    documentType: {
+      type: String,
+      enum: ["tax_invoice", "quotation", "proforma", "sales_order", "delivery_challan"],
+      default: "tax_invoice",
+    },
+    approvalState: {
+      type: String,
+      enum: ["none", "pending", "approved", "rejected"],
+      default: "none",
+    },
     customerId: { type: Schema.Types.ObjectId, ref: "Customer" },
     cashierId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     items: { type: [invoiceItemSchema], default: [] },

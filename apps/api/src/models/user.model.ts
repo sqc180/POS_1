@@ -4,6 +4,7 @@ const userSchema = new Schema(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: "Tenant", required: true },
     email: { type: String, required: true, lowercase: true, trim: true },
+    phone: { type: String, trim: true },
     passwordHash: { type: String, required: true },
     name: { type: String, required: true, trim: true },
     role: {
@@ -20,7 +21,11 @@ const userSchema = new Schema(
         "viewer",
       ],
     },
-    status: { type: String, enum: ["active", "inactive"], default: "active" },
+    status: {
+      type: String,
+      enum: ["active", "inactive", "invited", "suspended", "deactivated", "archived"],
+      default: "active",
+    },
     lastLoginAt: { type: Date },
   },
   { timestamps: true },

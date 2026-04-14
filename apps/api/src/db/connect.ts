@@ -5,6 +5,9 @@ import { InventoryItemModel } from "../models/inventory-item.model.js"
 import "../models/product-variant.model.js"
 import "../models/stock-batch.model.js"
 import "../models/product-serial.model.js"
+import "../models/user-branch-access.model.js"
+import "../models/async-job.model.js"
+import "../models/inventory-location.model.js"
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 

@@ -7,39 +7,107 @@ import {
   resolveActiveBusinessType,
 } from "@repo/business-type-engine"
 import { canCreateUserOrSetPassword, permissionsForRole } from "@repo/permissions"
-import type { BusinessTypeId, UserRole, UserStatus } from "@repo/types"
+import type { BusinessTypeId, UserPublic, UserRole, UserStatus } from "@repo/types"
+import { BranchModel } from "../models/branch.model.js"
 import { TenantModel } from "../models/tenant.model.js"
+import { UserBranchAccessModel } from "../models/user-branch-access.model.js"
 import { UserModel, type UserDoc } from "../models/user.model.js"
+import { isMongoDuplicateKeyError } from "../lib/mongo-errors.js"
 import { auditService } from "./audit.service.js"
 import { authService } from "./auth.service.js"
 
-const toPublic = (u: UserDoc) => ({
+const toPublic = (u: UserDoc): UserPublic => ({
   id: u._id.toString(),
   email: u.email,
   name: u.name,
+  phone: u.phone?.trim() ? u.phone.trim() : undefined,
   role: u.role as UserRole,
-  status: u.status as UserStatus,
+  status: (u.status as UserStatus) ?? "active",
   tenantId: u.tenantId.toString(),
+  branchCodes: null,
   lastLoginAt: u.lastLoginAt?.toISOString(),
   createdAt: u.createdAt?.toISOString?.() ?? new Date().toISOString(),
   updatedAt: u.updatedAt?.toISOString?.() ?? new Date().toISOString(),
 })
+
+const attachBranchCodes = async (tenantId: string, rows: UserPublic[]): Promise<UserPublic[]> => {
+  if (rows.length === 0) return rows
+  const tenantOid = new mongoose.Types.ObjectId(tenantId)
+  const userIds = rows.map((r) => new mongoose.Types.ObjectId(r.id))
+  const accessRows = await UserBranchAccessModel.find({
+    tenantId: tenantOid,
+    userId: { $in: userIds },
+  }).lean()
+  const byUser = new Map<string, string[]>()
+  for (const a of accessRows) {
+    const uid = (a as { userId: mongoose.Types.ObjectId }).userId.toString()
+    const codes = (a as { branchCodes?: string[] }).branchCodes ?? []
+    if (codes.length > 0) byUser.set(uid, codes)
+  }
+  return rows.map((r) => {
+    const codes = byUser.get(r.id)
+    return codes ? { ...r, branchCodes: codes } : { ...r, branchCodes: null }
+  })
+}
 
 export const userService = {
   toPublic,
 
   async list(tenantId: string) {
     const users = await UserModel.find({ tenantId: new mongoose.Types.ObjectId(tenantId) }).sort({ createdAt: -1 })
-    return users.map(toPublic)
+    return attachBranchCodes(tenantId, users.map(toPublic))
   },
 
-  async getById(tenantId: string, id: string) {
+  async listPaged(
+    tenantId: string,
+    opts: {
+      q?: string
+      role?: UserRole
+      status?: UserStatus
+      branchCode?: string
+      limit?: number
+      skip?: number
+    },
+  ): Promise<{ items: UserPublic[]; total: number; skip: number; limit: number }> {
+    const tenantOid = new mongoose.Types.ObjectId(tenantId)
+    const rawLimit = opts.limit ?? 25
+    const rawSkip = opts.skip ?? 0
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 25, 1), 100)
+    const skip = Math.max(Number.isFinite(rawSkip) ? rawSkip : 0, 0)
+    const filter: Record<string, unknown> = { tenantId: tenantOid }
+    if (opts.role) filter.role = opts.role
+    if (opts.status) filter.status = opts.status
+    if (opts.q?.trim()) {
+      const rx = new RegExp(opts.q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+      filter.$or = [{ name: rx }, { email: rx }, { phone: rx }]
+    }
+    if (opts.branchCode?.trim()) {
+      const usersWithBranch = await UserBranchAccessModel.find({
+        tenantId: tenantOid,
+        branchCodes: opts.branchCode.trim(),
+      }).distinct("userId")
+      if (usersWithBranch.length === 0) {
+        return { items: [], total: 0, skip, limit }
+      }
+      filter._id = { $in: usersWithBranch }
+    }
+    const [users, total] = await Promise.all([
+      UserModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      UserModel.countDocuments(filter),
+    ])
+    const items = await attachBranchCodes(tenantId, users.map(toPublic))
+    return { items, total, skip, limit }
+  },
+
+  async getById(tenantId: string, id: string): Promise<UserPublic | null> {
     if (!mongoose.Types.ObjectId.isValid(id)) return null
     const u = await UserModel.findOne({
       _id: new mongoose.Types.ObjectId(id),
       tenantId: new mongoose.Types.ObjectId(tenantId),
     })
-    return u ? toPublic(u) : null
+    if (!u) return null
+    const [row] = await attachBranchCodes(tenantId, [toPublic(u)])
+    return row ?? null
   },
 
   async create(
@@ -47,7 +115,7 @@ export const userService = {
     tenantId: string,
     actorId: string,
     actorRole: UserRole,
-    input: { email: string; password: string; name: string; role: UserRole },
+    input: { email: string; password: string; name: string; role: UserRole; phone?: string },
   ) {
     if (!canCreateUserOrSetPassword(actorRole)) {
       const err = new Error("Only owner or admin can create users")
@@ -66,15 +134,14 @@ export const userService = {
       user = await UserModel.create({
         tenantId: new mongoose.Types.ObjectId(tenantId),
         email: input.email.toLowerCase().trim(),
+        phone: input.phone?.trim(),
         passwordHash,
         name: input.name,
         role: input.role,
         status: "active",
       })
     } catch (e: unknown) {
-      const o = typeof e === "object" && e !== null ? (e as { code?: number; message?: string }) : {}
-      const dup = o.code === 11000 || (typeof o.message === "string" && o.message.includes("E11000"))
-      if (dup) {
+      if (isMongoDuplicateKeyError(e)) {
         const err = new Error("A user with this email already exists in your workspace")
         ;(err as Error & { statusCode?: number }).statusCode = 409
         throw err
@@ -89,7 +156,8 @@ export const userService = {
       entityId: user._id.toString(),
       metadata: { email: user.email, role: user.role },
     })
-    return toPublic(user)
+    const [created] = await attachBranchCodes(tenantId, [toPublic(user)])
+    return created!
   },
 
   async update(
@@ -97,7 +165,7 @@ export const userService = {
     actorId: string,
     actorRole: UserRole,
     id: string,
-    input: Partial<{ name: string; role: UserRole; status: UserStatus }>,
+    input: Partial<{ name: string; phone: string; role: UserRole; status: UserStatus }>,
   ) {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       const err = new Error("Invalid user id")
@@ -132,6 +200,7 @@ export const userService = {
       throw err
     }
     if (input.name !== undefined) user.name = input.name
+    if (input.phone !== undefined) user.phone = input.phone.trim() === "" ? undefined : input.phone.trim()
     if (input.role !== undefined) user.role = input.role
     if (input.status !== undefined) user.status = input.status
     await user.save()
@@ -143,7 +212,74 @@ export const userService = {
       entityId: user._id.toString(),
       metadata: { fields: Object.keys(input) },
     })
-    return toPublic(user)
+    const [updated] = await attachBranchCodes(tenantId, [toPublic(user)])
+    return updated!
+  },
+
+  async setBranchAccess(
+    tenantId: string,
+    actorId: string,
+    actorRole: UserRole,
+    userId: string,
+    branchCodes: string[],
+  ): Promise<UserPublic> {
+    if (!canCreateUserOrSetPassword(actorRole)) {
+      const err = new Error("Only owner or admin can manage branch access")
+      ;(err as Error & { statusCode?: number }).statusCode = 403
+      throw err
+    }
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      const err = new Error("Invalid user id")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const user = await UserModel.findOne({
+      _id: new mongoose.Types.ObjectId(userId),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+    })
+    if (!user) {
+      const err = new Error("User not found")
+      ;(err as Error & { statusCode?: number }).statusCode = 404
+      throw err
+    }
+    if (user.role === "owner") {
+      const err = new Error("Owner branch access is not restricted")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const normalized = [...new Set(branchCodes.map((c) => c.trim()).filter(Boolean))]
+    const tenantOid = new mongoose.Types.ObjectId(tenantId)
+    if (normalized.length > 0) {
+      const found = await BranchModel.countDocuments({
+        tenantId: tenantOid,
+        code: { $in: normalized },
+        status: "active",
+      })
+      if (found !== normalized.length) {
+        const err = new Error("One or more branch codes are invalid for this tenant")
+        ;(err as Error & { statusCode?: number }).statusCode = 400
+        throw err
+      }
+    }
+    if (normalized.length === 0) {
+      await UserBranchAccessModel.deleteOne({ tenantId: tenantOid, userId: user._id })
+    } else {
+      await UserBranchAccessModel.findOneAndUpdate(
+        { tenantId: tenantOid, userId: user._id },
+        { $set: { branchCodes: normalized } },
+        { upsert: true, new: true },
+      )
+    }
+    await auditService.log({
+      tenantId,
+      actorId,
+      action: "user.branch_access",
+      entity: "User",
+      entityId: user._id.toString(),
+      metadata: { branchCodes: normalized },
+    })
+    const [row] = await attachBranchCodes(tenantId, [toPublic(user)])
+    return row!
   },
 
   async resetPassword(env: ApiEnv, tenantId: string, actorId: string, actorRole: UserRole, id: string, newPassword: string) {
@@ -195,8 +331,9 @@ export const meService = {
     const permissions = filterPermissionsByBusinessType(businessType, rawPerms)
     const menu = getMenuForRole(businessType, role)
     const features = getFeatureMap(businessType)
+    const [userRow] = await attachBranchCodes(tenantId, [toPublic(user)])
     return {
-      user: userService.toPublic(user),
+      user: userRow!,
       tenant: {
         id: tenant._id.toString(),
         name: tenant.name,

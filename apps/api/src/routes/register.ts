@@ -5,9 +5,10 @@ import mongoose from "mongoose"
 import { z } from "zod"
 import type { ApiEnv } from "@repo/config"
 import { Permission, hasPermission } from "@repo/permissions"
-import type { FileAssetDocumentType } from "@repo/types"
+import type { FileAssetDocumentType, UserRole, UserStatus } from "@repo/types"
 import { createRequireAuth } from "../hooks/require-auth.js"
 import { requirePermission } from "../hooks/require-perm.js"
+import { isMongoDuplicateKeyError } from "../lib/mongo-errors.js"
 import { sendError } from "../lib/reply.js"
 import { authService, normalizeEmail } from "../services/auth.service.js"
 import { businessSettingsService } from "../services/business-settings.service.js"
@@ -15,6 +16,7 @@ import { branchService } from "../services/branch.service.js"
 import { categoryService } from "../services/category.service.js"
 import { customerService } from "../services/customer.service.js"
 import { gstSlabService } from "../services/gst-slab.service.js"
+import { inventoryLocationService } from "../services/inventory-location.service.js"
 import { inventoryService } from "../services/inventory.service.js"
 import { meService, userService } from "../services/user.service.js"
 import { productService } from "../services/product.service.js"
@@ -28,7 +30,9 @@ import { resolveStorageRoot } from "../lib/storage-root.js"
 import { createStorageFromEnv } from "../storage/factory.js"
 import { createStoredDocumentService } from "../services/stored-document.service.js"
 import { gatewayService } from "../services/gateway.service.js"
+import { gstSummaryService } from "../services/gst-summary.service.js"
 import { invoiceService } from "../services/invoice.service.js"
+import { jobService } from "../services/job.service.js"
 import { paymentService } from "../services/payment.service.js"
 import { posService } from "../services/pos.service.js"
 import { qrSessionService } from "../services/qr-session.service.js"
@@ -177,6 +181,35 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       return reply.send({ success: true, data })
     })
 
+    const jobEnqueueSchema = z.object({
+      type: z.enum(["gst_summary_export"]),
+      payload: z.object({ from: z.string().optional(), to: z.string().optional() }).optional(),
+    })
+
+    app.post("/jobs", { preHandler: [requirePermission(Permission.gst)] }, async (request, reply) => {
+      const auth = request.auth!
+      const parsed = jobEnqueueSchema.safeParse(request.body)
+      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+      try {
+        const data = await jobService.enqueue(auth.tenantId, auth.userId, {
+          type: parsed.data.type,
+          payload: parsed.data.payload ?? {},
+        })
+        return reply.status(201).send({ success: true, data })
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
+    app.get("/jobs/:id", { preHandler: [requirePermission(Permission.gst)] }, async (request, reply) => {
+      const auth = request.auth!
+      const { id } = request.params as { id: string }
+      const row = await jobService.getById(auth.tenantId, id)
+      if (!row) return sendError(reply, 404, "not_found", "Not found")
+      return reply.send({ success: true, data: row })
+    })
+
     app.get("/dashboard/summary", { preHandler: [requirePermission(Permission.dashboard)] }, async (request, reply) => {
       const auth = request.auth!
       const data = await dashboardSummaryService.get(auth.tenantId)
@@ -185,6 +218,26 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
 
     app.get("/users", { preHandler: [requirePermission(Permission.users)] }, async (request, reply) => {
       const auth = request.auth!
+      const q = request.query as {
+        q?: string
+        role?: string
+        status?: string
+        branch?: string
+        limit?: string
+        skip?: string
+        paged?: string
+      }
+      if (q.paged === "true" || q.limit !== undefined || q.skip !== undefined) {
+        const data = await userService.listPaged(auth.tenantId, {
+          q: q.q,
+          role: q.role as UserRole | undefined,
+          status: q.status as UserStatus | undefined,
+          branchCode: q.branch,
+          limit: q.limit !== undefined ? Number.parseInt(String(q.limit), 10) : undefined,
+          skip: q.skip !== undefined ? Number.parseInt(String(q.skip), 10) : undefined,
+        })
+        return reply.send({ success: true, data })
+      }
       const data = await userService.list(auth.tenantId)
       return reply.send({ success: true, data })
     })
@@ -201,6 +254,7 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       email: z.string().email(),
       password: z.string().min(8),
       name: z.string().min(1),
+      phone: z.string().optional(),
       role: z.enum([
         "admin",
         "manager",
@@ -218,7 +272,10 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
       try {
         const data = await userService.create(env, auth.tenantId, auth.userId, auth.role, {
-          ...parsed.data,
+          email: parsed.data.email,
+          password: parsed.data.password,
+          name: parsed.data.name,
+          phone: parsed.data.phone,
           role: parsed.data.role,
         })
         return reply.status(201).send({ success: true, data })
@@ -231,6 +288,7 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
 
     const updateUserSchema = z.object({
       name: z.string().optional(),
+      phone: z.string().optional(),
       role: z
         .enum([
           "owner",
@@ -243,8 +301,32 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
           "viewer",
         ])
         .optional(),
-      status: z.enum(["active", "inactive"]).optional(),
+      status: z
+        .enum(["active", "inactive", "invited", "suspended", "deactivated", "archived"])
+        .optional(),
     })
+
+    const branchAccessSchema = z.object({
+      branchCodes: z.array(z.string().min(1)).max(64),
+    })
+
+    app.patch(
+      "/users/:id/branch-access",
+      { preHandler: [requirePermission(Permission.users)] },
+      async (request, reply) => {
+        const auth = request.auth!
+        const { id } = request.params as { id: string }
+        const parsed = branchAccessSchema.safeParse(request.body)
+        if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+        try {
+          const data = await userService.setBranchAccess(auth.tenantId, auth.userId, auth.role, id, parsed.data.branchCodes)
+          return reply.send({ success: true, data })
+        } catch (e: unknown) {
+          const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+          return sendError(reply, status, "user_error", e instanceof Error ? e.message : "Failed")
+        }
+      },
+    )
 
     app.patch("/users/:id", { preHandler: [requirePermission(Permission.users)] }, async (request, reply) => {
       const auth = request.auth!
@@ -373,8 +455,29 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
 
     app.get("/products", { preHandler: [requirePermission(Permission.products)] }, async (request, reply) => {
       const auth = request.auth!
-      const q = (request.query as { q?: string }).q
-      const data = await productService.list(auth.tenantId, q)
+      const q = request.query as {
+        q?: string
+        paged?: string
+        categoryId?: string
+        sort?: string
+        order?: string
+        catalogLifecycle?: string
+        limit?: string
+        skip?: string
+      }
+      if (q.paged === "true") {
+        const data = await productService.listPaged(auth.tenantId, {
+          q: q.q,
+          categoryId: q.categoryId,
+          sort: q.sort as "updatedAt" | "name" | "sku" | "sellingPrice" | undefined,
+          order: q.order as "asc" | "desc" | undefined,
+          catalogLifecycle: q.catalogLifecycle as "active" | "discontinued" | "archived" | "all" | undefined,
+          limit: q.limit !== undefined ? Number.parseInt(String(q.limit), 10) : undefined,
+          skip: q.skip !== undefined ? Number.parseInt(String(q.skip), 10) : undefined,
+        })
+        return reply.send({ success: true, data })
+      }
+      const data = await productService.list(auth.tenantId, q.q)
       return reply.send({ success: true, data })
     })
 
@@ -411,7 +514,7 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
           return reply.status(201).send({ success: true, data })
         } catch (e: unknown) {
           const status = (e as Error & { statusCode?: number }).statusCode ?? 400
-          if (e && typeof e === "object" && "code" in e && (e as { code?: number }).code === 11000) {
+          if (isMongoDuplicateKeyError(e)) {
             return sendError(reply, 409, "duplicate", "Variant SKU must be unique for this tenant")
           }
           return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
@@ -487,7 +590,7 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
           return reply.status(201).send({ success: true, data })
         } catch (e: unknown) {
           const status = (e as Error & { statusCode?: number }).statusCode ?? 400
-          if (e && typeof e === "object" && "code" in e && (e as { code?: number }).code === 11000) {
+          if (isMongoDuplicateKeyError(e)) {
             return sendError(reply, 409, "duplicate", "Serial number already exists")
           }
           return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
@@ -506,6 +609,8 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
     const productSchema = z.object({
       name: z.string().min(1),
       sku: z.string().min(1),
+      internalCode: z.string().optional(),
+      hsnSac: z.string().optional(),
       barcode: z.string().optional(),
       categoryId: z.string().optional(),
       gstSlabId: z.string().optional(),
@@ -520,6 +625,7 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       variantMode: z.enum(["none", "optional", "required"]).optional(),
       batchTracking: z.boolean().optional(),
       serialTracking: z.boolean().optional(),
+      catalogLifecycle: z.enum(["active", "discontinued", "archived"]).optional(),
     })
 
     app.post("/products", { preHandler: [requirePermission(Permission.products)] }, async (request, reply) => {
@@ -530,7 +636,7 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
         const data = await productService.create(auth.tenantId, auth.userId, parsed.data)
         return reply.status(201).send({ success: true, data })
       } catch (e: unknown) {
-        if (e && typeof e === "object" && "code" in e && (e as { code?: number }).code === 11000) {
+        if (isMongoDuplicateKeyError(e)) {
           return sendError(reply, 409, "duplicate", "SKU must be unique")
         }
         return sendError(reply, 400, "error", e instanceof Error ? e.message : "Failed")
@@ -559,6 +665,13 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
     app.get("/gst-slabs", { preHandler: [requirePermission(Permission.gst)] }, async (request, reply) => {
       const auth = request.auth!
       const data = await gstSlabService.list(auth.tenantId)
+      return reply.send({ success: true, data })
+    })
+
+    app.get("/gst/summary", { preHandler: [requirePermission(Permission.gst)] }, async (request, reply) => {
+      const auth = request.auth!
+      const q = request.query as { from?: string; to?: string }
+      const data = await gstSummaryService.summarizeCompleted(auth.tenantId, { from: q.from, to: q.to })
       return reply.send({ success: true, data })
     })
 
@@ -605,6 +718,13 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       return reply.send({ success: true, data })
     })
 
+    app.get("/inventory/locations", { preHandler: [requirePermission(Permission.inventory)] }, async (request, reply) => {
+      const auth = request.auth!
+      const q = request.query as { branchId?: string }
+      const data = await inventoryLocationService.list(auth.tenantId, q.branchId)
+      return reply.send({ success: true, data })
+    })
+
     app.get("/inventory/:id", { preHandler: [requirePermission(Permission.inventory)] }, async (request, reply) => {
       const auth = request.auth!
       const { id } = request.params as { id: string }
@@ -635,7 +755,24 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
 
     const movementSchema = z.object({
       inventoryItemId: z.string(),
-      type: z.enum(["in", "out", "adjustment", "correction", "transfer"]),
+      type: z.enum([
+        "in",
+        "out",
+        "adjustment",
+        "correction",
+        "transfer",
+        "opening",
+        "purchase",
+        "purchase_return",
+        "sale",
+        "sale_return",
+        "transfer_out",
+        "transfer_in",
+        "production_consumption",
+        "production_output",
+        "damage",
+        "expiry_write_off",
+      ]),
       quantity: z.number(),
       reason: z.string().optional(),
       referenceType: z.string().optional(),
@@ -716,6 +853,18 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       return reply.send({ success: true, data: row })
     })
 
+    app.get("/customers/:id/receivable", { preHandler: [requirePermission(Permission.customers)] }, async (request, reply) => {
+      const auth = request.auth!
+      const { id } = request.params as { id: string }
+      try {
+        const data = await customerService.getReceivableSnapshot(auth.tenantId, id)
+        return reply.send({ success: true, data })
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
     const customerSchema = z.object({
       name: z.string().min(1),
       phone: z.string().optional(),
@@ -723,6 +872,7 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       gstin: z.string().optional(),
       address: z.string().optional(),
       notes: z.string().optional(),
+      creditLimit: z.number().nonnegative().optional(),
     })
 
     app.post("/customers", { preHandler: [requirePermission(Permission.customers)] }, async (request, reply) => {
@@ -763,6 +913,13 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       const row = await supplierService.getById(auth.tenantId, id)
       if (!row) return sendError(reply, 404, "not_found", "Not found")
       return reply.send({ success: true, data: row })
+    })
+
+    app.get("/suppliers/:id/payables", { preHandler: [requirePermission(Permission.suppliers)] }, async (request, reply) => {
+      const auth = request.auth!
+      const { id } = request.params as { id: string }
+      const data = await supplierService.getPayablesSnapshot(auth.tenantId, id)
+      return reply.send({ success: true, data })
     })
 
     const supplierSchema = z.object({
@@ -944,6 +1101,42 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
           ...(b.lines !== undefined ? { lines: b.lines } : {}),
           ...(b.notes !== undefined ? { notes: b.notes } : {}),
         })
+        return reply.send({ success: true, data })
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
+    app.post("/invoices/:id/submit-approval", { preHandler: [requirePermission(Permission.billing)] }, async (request, reply) => {
+      const auth = request.auth!
+      const { id } = request.params as { id: string }
+      try {
+        const data = await invoiceService.submitApprovalForInvoice(auth.tenantId, auth.userId, id)
+        return reply.send({ success: true, data })
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
+    app.post("/invoices/:id/approve-approval", { preHandler: [requirePermission(Permission.billing)] }, async (request, reply) => {
+      const auth = request.auth!
+      const { id } = request.params as { id: string }
+      try {
+        const data = await invoiceService.approveInvoice(auth.tenantId, auth.userId, auth.role, id)
+        return reply.send({ success: true, data })
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
+    app.post("/invoices/:id/reject-approval", { preHandler: [requirePermission(Permission.billing)] }, async (request, reply) => {
+      const auth = request.auth!
+      const { id } = request.params as { id: string }
+      try {
+        const data = await invoiceService.rejectInvoiceApproval(auth.tenantId, auth.userId, auth.role, id)
         return reply.send({ success: true, data })
       } catch (e: unknown) {
         const status = (e as Error & { statusCode?: number }).statusCode ?? 400

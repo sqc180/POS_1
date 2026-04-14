@@ -50,9 +50,20 @@ export const stockService = {
     const q = Math.abs(input.quantity)
     switch (input.type) {
       case "in":
+      case "opening":
+      case "purchase":
+      case "transfer_in":
+      case "production_output":
+      case "sale_return":
         delta = q
         break
       case "out":
+      case "sale":
+      case "transfer_out":
+      case "purchase_return":
+      case "production_consumption":
+      case "damage":
+      case "expiry_write_off":
         delta = -q
         break
       case "adjustment":
@@ -85,7 +96,23 @@ export const stockService = {
       variantId: vOid,
       batchId: bOid,
       type: input.type,
-      quantity: input.type === "out" ? -q : input.type === "in" ? q : input.quantity,
+      quantity:
+        input.type === "out" ||
+        input.type === "sale" ||
+        input.type === "transfer_out" ||
+        input.type === "purchase_return" ||
+        input.type === "production_consumption" ||
+        input.type === "damage" ||
+        input.type === "expiry_write_off"
+          ? -q
+          : input.type === "in" ||
+              input.type === "opening" ||
+              input.type === "purchase" ||
+              input.type === "transfer_in" ||
+              input.type === "production_output" ||
+              input.type === "sale_return"
+            ? q
+            : input.quantity,
       reason: input.reason,
       referenceType: input.referenceType,
       referenceId: input.referenceId,

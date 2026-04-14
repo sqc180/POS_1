@@ -5,6 +5,8 @@ const productSchema = new Schema(
     tenantId: { type: Schema.Types.ObjectId, ref: "Tenant", required: true },
     name: { type: String, required: true, trim: true },
     sku: { type: String, required: true, trim: true },
+    internalCode: { type: String, trim: true },
+    hsnSac: { type: String, trim: true },
     barcode: { type: String, trim: true },
     categoryId: { type: Schema.Types.ObjectId, ref: "Category" },
     gstSlabId: { type: Schema.Types.ObjectId, ref: "GstSlab" },
@@ -17,6 +19,12 @@ const productSchema = new Schema(
     unit: { type: String, trim: true },
     imageUrl: { type: String, trim: true },
     status: { type: String, enum: ["active", "inactive"], default: "active" },
+    /** Catalog lifecycle beyond simple active/inactive (e.g. discontinued). */
+    catalogLifecycle: {
+      type: String,
+      enum: ["active", "discontinued", "archived"],
+      default: "active",
+    },
     variantMode: {
       type: String,
       enum: ["none", "optional", "required"],
@@ -32,6 +40,7 @@ const productSchema = new Schema(
 
 productSchema.index({ tenantId: 1, sku: 1 }, { unique: true })
 productSchema.index({ tenantId: 1, barcode: 1 }, { sparse: true })
+productSchema.index({ tenantId: 1, internalCode: 1 }, { sparse: true })
 
 export type ProductDoc = InferSchemaType<typeof productSchema> & { _id: mongoose.Types.ObjectId }
 export const ProductModel = mongoose.model("Product", productSchema)

@@ -12,19 +12,44 @@ export type UserRole =
 
 export type TenantStatus = "active" | "suspended"
 
-export type UserStatus = "active" | "inactive"
+export type UserStatus =
+  | "active"
+  | "inactive"
+  | "invited"
+  | "suspended"
+  | "deactivated"
+  | "archived"
 
 export type TaxMode = "inclusive" | "exclusive"
 
-export type StockMovementType = "in" | "out" | "adjustment" | "correction" | "transfer"
+export type StockMovementType =
+  | "in"
+  | "out"
+  | "adjustment"
+  | "correction"
+  | "transfer"
+  | "opening"
+  | "purchase"
+  | "purchase_return"
+  | "sale"
+  | "sale_return"
+  | "transfer_out"
+  | "transfer_in"
+  | "production_consumption"
+  | "production_output"
+  | "damage"
+  | "expiry_write_off"
 
 export interface UserPublic {
   id: string
   email: string
   name: string
+  phone?: string
   role: UserRole
   status: UserStatus
   tenantId: string
+  /** Omitted or null = all branches; non-empty = restricted to these branch codes. */
+  branchCodes?: string[] | null
   lastLoginAt?: string
   createdAt: string
   updatedAt: string

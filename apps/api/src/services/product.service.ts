@@ -12,6 +12,8 @@ const toPublic = (p: ProductDoc) => ({
   tenantId: p.tenantId.toString(),
   name: p.name,
   sku: p.sku,
+  internalCode: p.internalCode ?? "",
+  hsnSac: p.hsnSac ?? "",
   barcode: p.barcode ?? "",
   categoryId: p.categoryId?.toString() ?? null,
   gstSlabId: p.gstSlabId?.toString() ?? null,
@@ -24,6 +26,7 @@ const toPublic = (p: ProductDoc) => ({
   unit: p.unit ?? "",
   imageUrl: p.imageUrl ?? "",
   status: p.status,
+  catalogLifecycle: (p.catalogLifecycle as "active" | "discontinued" | "archived" | undefined) ?? "active",
   variantMode: (p.variantMode as VariantMode | undefined) ?? "none",
   batchTracking: p.batchTracking === true,
   serialTracking: p.serialTracking === true,
@@ -52,6 +55,45 @@ export const productService = {
     }
     const items = await ProductModel.find(filter).sort({ updatedAt: -1 }).limit(200)
     return items.map(toPublic)
+  },
+
+  async listPaged(
+    tenantId: string,
+    opts: {
+      q?: string
+      categoryId?: string
+      sort?: "updatedAt" | "name" | "sku" | "sellingPrice"
+      order?: "asc" | "desc"
+      catalogLifecycle?: "active" | "discontinued" | "archived" | "all"
+      limit?: number
+      skip?: number
+    },
+  ): Promise<{ items: ReturnType<typeof toPublic>[]; total: number; skip: number; limit: number }> {
+    const tenantOid = new mongoose.Types.ObjectId(tenantId)
+    const rawLimit = opts.limit ?? 25
+    const rawSkip = opts.skip ?? 0
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 25, 1), 100)
+    const skip = Math.max(Number.isFinite(rawSkip) ? rawSkip : 0, 0)
+    const filter: Record<string, unknown> = { tenantId: tenantOid }
+    if (opts.q?.trim()) {
+      const esc = opts.q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      const rx = new RegExp(esc, "i")
+      filter.$or = [{ name: rx }, { sku: rx }, { barcode: rx }, { internalCode: rx }, { hsnSac: rx }]
+    }
+    if (opts.categoryId && mongoose.Types.ObjectId.isValid(opts.categoryId)) {
+      filter.categoryId = new mongoose.Types.ObjectId(opts.categoryId)
+    }
+    if (opts.catalogLifecycle && opts.catalogLifecycle !== "all") {
+      filter.catalogLifecycle = opts.catalogLifecycle
+    }
+    const sortField = opts.sort ?? "updatedAt"
+    const order = opts.order === "asc" ? 1 : -1
+    const sort: Record<string, 1 | -1> = { [sortField]: order, _id: -1 }
+    const [items, total] = await Promise.all([
+      ProductModel.find(filter).sort(sort).skip(skip).limit(limit),
+      ProductModel.countDocuments(filter),
+    ])
+    return { items: items.map(toPublic), total, skip, limit }
   },
 
   async getById(tenantId: string, id: string) {
@@ -83,6 +125,9 @@ export const productService = {
       variantMode?: VariantMode
       batchTracking?: boolean
       serialTracking?: boolean
+      internalCode?: string
+      hsnSac?: string
+      catalogLifecycle?: "active" | "discontinued" | "archived"
     },
   ) {
     const variantMode = input.variantMode ?? "none"
@@ -95,6 +140,8 @@ export const productService = {
       tenantId: new mongoose.Types.ObjectId(tenantId),
       name: input.name,
       sku: input.sku,
+      internalCode: input.internalCode?.trim(),
+      hsnSac: input.hsnSac?.trim(),
       barcode: input.barcode,
       categoryId: input.categoryId && mongoose.Types.ObjectId.isValid(input.categoryId)
         ? new mongoose.Types.ObjectId(input.categoryId)
@@ -111,6 +158,7 @@ export const productService = {
       unit: input.unit,
       imageUrl: input.imageUrl,
       status: "active",
+      catalogLifecycle: input.catalogLifecycle ?? "active",
       variantMode,
       batchTracking: input.batchTracking ?? false,
       serialTracking: input.serialTracking ?? false,
@@ -162,6 +210,9 @@ export const productService = {
       variantMode: VariantMode
       batchTracking: boolean
       serialTracking: boolean
+      internalCode: string
+      hsnSac: string
+      catalogLifecycle: "active" | "discontinued" | "archived"
     }>,
   ) {
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -181,6 +232,8 @@ export const productService = {
     const wasTrack = p.trackStock
     if (input.name !== undefined) p.name = input.name
     if (input.sku !== undefined) p.sku = input.sku
+    if (input.internalCode !== undefined) p.internalCode = input.internalCode.trim() === "" ? undefined : input.internalCode.trim()
+    if (input.hsnSac !== undefined) p.hsnSac = input.hsnSac.trim() === "" ? undefined : input.hsnSac.trim()
     if (input.barcode !== undefined) p.barcode = input.barcode
     if (input.categoryId !== undefined) {
       p.categoryId =
@@ -203,6 +256,9 @@ export const productService = {
     if (input.unit !== undefined) p.unit = input.unit
     if (input.imageUrl !== undefined) p.imageUrl = input.imageUrl
     if (input.status !== undefined) p.status = input.status as "active" | "inactive"
+    if (input.catalogLifecycle !== undefined) {
+      p.catalogLifecycle = input.catalogLifecycle
+    }
     if (input.variantMode !== undefined) {
       if (input.variantMode === "required") {
         const n = await ProductVariantModel.countDocuments({

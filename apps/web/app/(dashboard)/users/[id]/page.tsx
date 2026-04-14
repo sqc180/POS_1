@@ -36,14 +36,18 @@ import { useAuth } from "@/components/auth-provider"
 import { apiRequest } from "@/lib/api"
 import { notifyError } from "@/lib/notify"
 
+const userStatuses = ["active", "inactive", "invited", "suspended", "deactivated", "archived"] as const
+
 const updateSchema = z.object({
   name: z.string().min(1),
+  phone: z.string().optional(),
   role: z.enum(["admin", "manager", "cashier", "billing_staff", "inventory_staff", "accountant", "viewer"]),
-  status: z.enum(["active", "inactive"]),
+  status: z.enum(userStatuses),
 })
 
 const nameOnlySchema = z.object({
   name: z.string().min(1),
+  phone: z.string().optional(),
 })
 
 const resetSchema = z.object({ password: z.string().min(8) })
@@ -89,20 +93,21 @@ export default function UserDetailPage() {
 
   const form = useForm<z.infer<typeof updateSchema>>({
     resolver: zodResolver(updateSchema),
-    defaultValues: { name: "", role: "cashier", status: "active" },
+    defaultValues: { name: "", phone: "", role: "cashier", status: "active" },
   })
 
   const nameOnlyForm = useForm<z.infer<typeof nameOnlySchema>>({
     resolver: zodResolver(nameOnlySchema),
-    defaultValues: { name: "" },
+    defaultValues: { name: "", phone: "" },
   })
 
   useEffect(() => {
     if (!user || user.role === "owner") return
     form.reset({
       name: user.name,
+      phone: user.phone ?? "",
       role: user.role as z.infer<typeof updateSchema>["role"],
-      status: user.status,
+      status: user.status as z.infer<typeof updateSchema>["status"],
     })
   }, [user, form])
 
@@ -115,13 +120,18 @@ export default function UserDetailPage() {
 
   useEffect(() => {
     if (!showNameOnlyEdit || !user) return
-    nameOnlyForm.reset({ name: user.name })
+    nameOnlyForm.reset({ name: user.name, phone: user.phone ?? "" })
   }, [user, showNameOnlyEdit, nameOnlyForm])
 
   const handleUpdate = form.handleSubmit(async (values) => {
     const res = await apiRequest<UserPublic>(`/users/${userId}`, {
       method: "PATCH",
-      body: JSON.stringify(values),
+      body: JSON.stringify({
+        name: values.name,
+        phone: values.phone,
+        role: values.role,
+        status: values.status,
+      }),
     })
     if (!res.success) {
       form.setError("root", { message: res.error.message })
@@ -135,7 +145,7 @@ export default function UserDetailPage() {
   const handleNameOnly = nameOnlyForm.handleSubmit(async (values) => {
     const res = await apiRequest<UserPublic>(`/users/${userId}`, {
       method: "PATCH",
-      body: JSON.stringify({ name: values.name }),
+      body: JSON.stringify({ name: values.name, phone: values.phone }),
     })
     if (!res.success) {
       nameOnlyForm.setError("root", { message: res.error.message })
@@ -196,6 +206,7 @@ export default function UserDetailPage() {
         <CardHeader>
           <CardTitle>{user.name}</CardTitle>
           <p className="text-sm text-muted-foreground">{user.email}</p>
+          {user.phone ? <p className="text-sm text-muted-foreground">{user.phone}</p> : null}
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
@@ -230,8 +241,21 @@ export default function UserDetailPage() {
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={nameOnlyForm.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Phone</FormLabel>
+                      <FormControl>
+                        <Input type="tel" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <Button type="submit" disabled={nameOnlyForm.formState.isSubmitting}>
-                  Save name
+                  Save profile
                 </Button>
               </form>
             </Form>
@@ -253,6 +277,19 @@ export default function UserDetailPage() {
                       <FormLabel>Name</FormLabel>
                       <FormControl>
                         <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Phone</FormLabel>
+                      <FormControl>
+                        <Input type="tel" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -297,8 +334,11 @@ export default function UserDetailPage() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="active">Active</SelectItem>
-                          <SelectItem value="inactive">Inactive</SelectItem>
+                          {userStatuses.map((s) => (
+                            <SelectItem key={s} value={s}>
+                              {s}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />

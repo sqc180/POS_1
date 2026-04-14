@@ -1,4 +1,6 @@
 import mongoose from "mongoose"
+import { canCreateUserOrSetPassword } from "@repo/permissions"
+import type { UserRole } from "@repo/types"
 import { BusinessSettingsModel } from "../models/business-settings.model.js"
 import { InvoiceModel, type InvoiceDoc } from "../models/invoice.model.js"
 import { ProductModel } from "../models/product.model.js"
@@ -40,6 +42,8 @@ const toPublic = (inv: InvoiceDoc) => ({
   tenantId: inv.tenantId.toString(),
   invoiceNumber: inv.invoiceNumber ?? "",
   status: inv.status,
+  documentType: (inv as { documentType?: string }).documentType ?? "tax_invoice",
+  approvalState: (inv as { approvalState?: string }).approvalState ?? "none",
   customerId: inv.customerId?.toString() ?? null,
   cashierId: inv.cashierId.toString(),
   items: inv.items.map((i) => {
@@ -203,6 +207,7 @@ export const invoiceService = {
       inv.sgstTotal = sums.sgstTotal
       inv.igstTotal = sums.igstTotal
       inv.grandTotal = sums.grandTotal
+      ;(inv as { approvalState?: string }).approvalState = "none"
     }
     await inv.save()
     await auditService.log({
@@ -227,6 +232,17 @@ export const invoiceService = {
     })
     if (!inv || inv.status !== "draft") {
       const err = new Error("Invoice cannot be completed")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    const approvalState = (inv as { approvalState?: string }).approvalState ?? "none"
+    if (approvalState === "pending") {
+      const err = new Error("Invoice is pending approval and cannot be completed yet")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    if (approvalState === "rejected") {
+      const err = new Error("Invoice approval was rejected; update lines and resubmit for approval")
       ;(err as Error & { statusCode?: number }).statusCode = 409
       throw err
     }
@@ -428,5 +444,112 @@ export const invoiceService = {
     if (!inv) return
     inv.amountPaid = Math.round((inv.amountPaid + delta) * 100) / 100
     await inv.save()
+  },
+
+  async submitApprovalForInvoice(tenantId: string, actorId: string, id: string) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      const err = new Error("Invalid invoice")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const inv = await InvoiceModel.findOne({
+      _id: new mongoose.Types.ObjectId(id),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+    })
+    if (!inv || inv.status !== "draft") {
+      const err = new Error("Only draft invoices can be submitted for approval")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    const cur = ((inv as { approvalState?: string }).approvalState ?? "none") as string
+    if (cur !== "none" && cur !== "rejected") {
+      const err = new Error("Invoice is not in a state that allows submit for approval")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    ;(inv as { approvalState?: string }).approvalState = "pending"
+    await inv.save()
+    await auditService.log({
+      tenantId,
+      actorId,
+      action: "invoice.submit_approval",
+      entity: "Invoice",
+      entityId: inv._id.toString(),
+    })
+    return toPublic(inv)
+  },
+
+  async approveInvoice(tenantId: string, actorId: string, actorRole: UserRole, id: string) {
+    if (!canCreateUserOrSetPassword(actorRole)) {
+      const err = new Error("Only owner or admin can approve invoices")
+      ;(err as Error & { statusCode?: number }).statusCode = 403
+      throw err
+    }
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      const err = new Error("Invalid invoice")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const inv = await InvoiceModel.findOne({
+      _id: new mongoose.Types.ObjectId(id),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+    })
+    if (!inv || inv.status !== "draft") {
+      const err = new Error("Invoice not found or not a draft")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    if (((inv as { approvalState?: string }).approvalState ?? "none") !== "pending") {
+      const err = new Error("Invoice is not pending approval")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    ;(inv as { approvalState?: string }).approvalState = "approved"
+    await inv.save()
+    await auditService.log({
+      tenantId,
+      actorId,
+      action: "invoice.approve",
+      entity: "Invoice",
+      entityId: inv._id.toString(),
+    })
+    return toPublic(inv)
+  },
+
+  async rejectInvoiceApproval(tenantId: string, actorId: string, actorRole: UserRole, id: string) {
+    if (!canCreateUserOrSetPassword(actorRole)) {
+      const err = new Error("Only owner or admin can reject invoice approvals")
+      ;(err as Error & { statusCode?: number }).statusCode = 403
+      throw err
+    }
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      const err = new Error("Invalid invoice")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const inv = await InvoiceModel.findOne({
+      _id: new mongoose.Types.ObjectId(id),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+    })
+    if (!inv || inv.status !== "draft") {
+      const err = new Error("Invoice not found or not a draft")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    if (((inv as { approvalState?: string }).approvalState ?? "none") !== "pending") {
+      const err = new Error("Invoice is not pending approval")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
+    ;(inv as { approvalState?: string }).approvalState = "rejected"
+    await inv.save()
+    await auditService.log({
+      tenantId,
+      actorId,
+      action: "invoice.reject_approval",
+      entity: "Invoice",
+      entityId: inv._id.toString(),
+    })
+    return toPublic(inv)
   },
 }
