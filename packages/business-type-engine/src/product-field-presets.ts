@@ -22,6 +22,12 @@ export interface ProductFieldHintRow {
 
 const trivialSaleUoms = new Set(["", "piece", "pcs", "each", "unit", "no"])
 
+/** True when `saleUom` is set to a non-catalog default (grocery-style UOM). */
+export const isSaleUomGroceryStyle = (saleUom: string | null | undefined): boolean => {
+  const u = (saleUom ?? "").trim().toLowerCase()
+  return u.length > 0 && !trivialSaleUoms.has(u)
+}
+
 type FieldRule = {
   requiresAll: readonly VerticalCapability[]
   section: ProductFieldSection
@@ -30,7 +36,7 @@ type FieldRule = {
 const FIELD_RULES: Record<ProductFormFieldKey, FieldRule> = {
   saleUom: { requiresAll: [VerticalCapability.weightBreakBulk], section: "catalog" },
   isLoose: { requiresAll: [VerticalCapability.weightBreakBulk], section: "catalog" },
-  batchTracking: { requiresAll: [], section: "catalog" },
+  batchTracking: { requiresAll: [], section: "stock_entry" },
   serialTracking: { requiresAll: [], section: "catalog" },
   behaviorAugmentFlags: { requiresAll: [], section: "catalog" },
 }
@@ -66,8 +72,7 @@ export const validateProductFieldsAgainstTenantCaps = (
   },
 ): string | null => {
   const merged = mergeProductAugmentedCapabilities(tenantEffectiveCaps, body.behaviorAugmentFlags ?? [])
-  const u = (body.saleUom ?? "").trim().toLowerCase()
-  const groceryish = body.isLoose === true || (u.length > 0 && !trivialSaleUoms.has(u))
+  const groceryish = body.isLoose === true || isSaleUomGroceryStyle(body.saleUom)
   if (groceryish && !hasVerticalCapability(merged, VerticalCapability.weightBreakBulk)) {
     return "Loose or sale unit (UOM) fields require the weight / break-bulk capability on the tenant, branch pack, or product behavior augment flags"
   }

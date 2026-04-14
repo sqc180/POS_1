@@ -12,10 +12,13 @@ export const billingOrchestratorService = {
   /**
    * Resolve once per confirm using the same default branch as `invoiceService.complete` (BusinessSettings).
    */
-  async loadRulesForDefaultBranch(tenantId: string): Promise<ResolvedBusinessRules> {
+  async loadRulesForDefaultBranch(
+    tenantId: string,
+  ): Promise<{ rules: ResolvedBusinessRules; branchCode: string }> {
     const settings = await BusinessSettingsModel.findOne({ tenantId: new mongoose.Types.ObjectId(tenantId) })
     const branchCode = settings?.defaultBranchId ?? "main"
-    return loadResolvedRulesWithOptionalBranch(tenantId, branchCode)
+    const rules = await loadResolvedRulesWithOptionalBranch(tenantId, branchCode)
+    return { rules, branchCode }
   },
 
   resolveBillingStrategyKey(rules: ResolvedBusinessRules): BillingStrategyKey {
@@ -28,9 +31,12 @@ export const billingOrchestratorService = {
     actorId: string,
     invoiceId: string,
   ): Promise<Awaited<ReturnType<typeof invoiceService.complete>>> {
-    const rules = await billingOrchestratorService.loadRulesForDefaultBranch(tenantId)
+    const { rules, branchCode } = await billingOrchestratorService.loadRulesForDefaultBranch(tenantId)
     const strategy = billingOrchestratorService.resolveBillingStrategyKey(rules)
     void strategy
-    return invoiceService.complete(tenantId, actorId, invoiceId)
+    return invoiceService.complete(tenantId, actorId, invoiceId, {
+      branchResolvedRules: rules,
+      branchCodeForRules: branchCode,
+    })
   },
 }

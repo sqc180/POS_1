@@ -1,5 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { resolveBusinessRules, VerticalCapability, resolveVerticalCapabilities } from "@repo/business-type-engine"
+import {
+  buildProductFieldHintsFromCaps,
+  resolveBusinessRules,
+  VerticalCapability,
+  resolveVerticalCapabilities,
+} from "@repo/business-type-engine"
+import { loadResolvedRulesWithOptionalBranch } from "../../src/lib/ruleResolver.js"
 import { authBearer, injectJson, parseJson } from "../helpers/http.js"
 import { openTestApp } from "../helpers/context.js"
 import { onboardRetailTenant } from "../factories/tenant.js"
@@ -30,6 +36,7 @@ describe("capability pack scenarios", () => {
   describe("branch overrides and /me branchCode", () => {
     let ctx: Awaited<ReturnType<typeof openTestApp>>
     let ownerToken: string
+    let tenantId: string
     let branchId: string
 
     beforeAll(async () => {
@@ -39,6 +46,7 @@ describe("capability pack scenarios", () => {
         ownerPassword: "packpass12345",
       })
       ownerToken = o.token
+      tenantId = o.tenantId
 
       await injectJson(ctx.app, "PATCH", "/settings/pilot-vertical", {
         headers: authBearer(ownerToken),
@@ -78,6 +86,24 @@ describe("capability pack scenarios", () => {
         expect.arrayContaining([VerticalCapability.batchExpiry, VerticalCapability.rxScheduleH]),
       )
       expect(body.data.contextBranchCode).toBe("rx-wing")
+    })
+
+    it("GET /me?branchCode= branchProductFieldHints matches loadResolvedRulesWithOptionalBranch + engine", async () => {
+      const me = await injectJson(ctx.app, "GET", "/me?branchCode=rx-wing", { headers: authBearer(ownerToken) })
+      expect(me.statusCode).toBe(200)
+      const body = parseJson<{
+        success: true
+        data: {
+          branchProductFieldHints?: { key: string; visible: boolean; section: string }[]
+        }
+      }>(me.body)
+      const resolved = await loadResolvedRulesWithOptionalBranch(tenantId, "rx-wing")
+      const expected = buildProductFieldHintsFromCaps(resolved.capabilities).map((h) => ({
+        key: h.key,
+        visible: h.visible,
+        section: h.section,
+      }))
+      expect(body.data.branchProductFieldHints).toEqual(expected)
     })
   })
 

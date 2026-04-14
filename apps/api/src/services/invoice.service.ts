@@ -1,4 +1,5 @@
 import mongoose from "mongoose"
+import type { ResolvedBusinessRules } from "@repo/business-type-engine"
 import { getCreditPolicyForCapabilities } from "@repo/business-type-engine"
 import { canCreateUserOrSetPassword } from "@repo/permissions"
 import type { UserRole } from "@repo/types"
@@ -223,7 +224,12 @@ export const invoiceService = {
     return toPublic(inv)
   },
 
-  async complete(tenantId: string, actorId: string, id: string) {
+  async complete(
+    tenantId: string,
+    actorId: string,
+    id: string,
+    opts?: { branchResolvedRules?: ResolvedBusinessRules; branchCodeForRules?: string },
+  ) {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       const err = new Error("Invalid invoice")
       ;(err as Error & { statusCode?: number }).statusCode = 400
@@ -310,8 +316,15 @@ export const invoiceService = {
     inv.igstTotal = sums.igstTotal
     inv.grandTotal = sums.grandTotal
 
-    const resolved = await loadResolvedRulesWithOptionalBranch(tenantId, branchId)
-    const caps = resolved.capabilities
+    const preloaded = opts?.branchResolvedRules
+    const preloadedCode = opts?.branchCodeForRules
+    const usePreloaded =
+      preloaded !== undefined &&
+      preloadedCode !== undefined &&
+      preloadedCode === branchId
+    const caps = usePreloaded
+      ? preloaded.capabilities
+      : (await loadResolvedRulesWithOptionalBranch(tenantId, branchId)).capabilities
     const creditHint = getCreditPolicyForCapabilities(caps)
     if (creditHint.atComplete === "audit_over_limit" && inv.customerId) {
       const snap = await customerService.getReceivableSnapshot(tenantId, inv.customerId.toString())

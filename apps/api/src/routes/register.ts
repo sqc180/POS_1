@@ -8,13 +8,13 @@ import { Permission, hasPermission } from "@repo/permissions"
 import {
   buildProductFieldHintsFromCaps,
   isPilotVerticalSlug,
-  isProductBehaviorProfileId,
   validateProductFieldsAgainstTenantCaps,
 } from "@repo/business-type-engine"
 import type { FileAssetDocumentType, UserRole, UserStatus } from "@repo/types"
 import { createRequireAuth } from "../hooks/require-auth.js"
 import { requirePermission } from "../hooks/require-perm.js"
 import { isMongoDuplicateKeyError } from "../lib/mongo-errors.js"
+import { buildProductPatchSchema, buildProductRequestSchema } from "../lib/schemaFactory.js"
 import { loadResolvedTenantRules } from "../lib/ruleResolver.js"
 import { sendError } from "../lib/reply.js"
 import { authService, normalizeEmail } from "../services/auth.service.js"
@@ -654,44 +654,11 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       return reply.send({ success: true, data: p })
     })
 
-    const productSchema = z.object({
-      name: z.string().min(1),
-      sku: z.string().min(1),
-      internalCode: z.string().optional(),
-      hsnSac: z.string().optional(),
-      barcode: z.string().optional(),
-      categoryId: z.string().optional(),
-      gstSlabId: z.string().optional(),
-      taxMode: z.enum(["inclusive", "exclusive"]).optional(),
-      sellingPrice: z.number().nonnegative(),
-      costPrice: z.number().nonnegative().optional(),
-      mrp: z.number().nonnegative().optional(),
-      trackStock: z.boolean().optional(),
-      brand: z.string().optional(),
-      unit: z.string().optional(),
-      imageUrl: z.string().optional(),
-      variantMode: z.enum(["none", "optional", "required"]).optional(),
-      batchTracking: z.boolean().optional(),
-      serialTracking: z.boolean().optional(),
-      catalogLifecycle: z.enum(["active", "discontinued", "archived"]).optional(),
-      /** Grocery-style sale unit (e.g. kg, piece); optional, ignored unless tenant has weight_break_bulk capability in UI. */
-      saleUom: z.string().optional(),
-      isLoose: z.boolean().optional(),
-      /** Adds capability flags for this product (merged with tenant/branch effective caps). */
-      behaviorAugmentFlags: z.array(z.string().max(64)).max(32).optional(),
-      behaviorProfileId: z
-        .union([z.string().trim().max(64), z.null()])
-        .optional()
-        .refine((v) => v === undefined || v === null || isProductBehaviorProfileId(v), {
-          message: "Invalid behaviorProfileId",
-        }),
-    })
-
     app.post("/products", { preHandler: [requirePermission(Permission.products)] }, async (request, reply) => {
       const auth = request.auth!
-      const parsed = productSchema.safeParse(request.body)
-      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
       const tenantRules = await loadResolvedTenantRules(auth.tenantId)
+      const parsed = buildProductRequestSchema(tenantRules.capabilities).safeParse(request.body)
+      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
       const fieldErr = validateProductFieldsAgainstTenantCaps(tenantRules.capabilities, {
         saleUom: parsed.data.saleUom,
         isLoose: parsed.data.isLoose,
@@ -712,16 +679,12 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
     app.patch("/products/:id", { preHandler: [requirePermission(Permission.products)] }, async (request, reply) => {
       const auth = request.auth!
       const { id } = request.params as { id: string }
-      const parsed = productSchema
-        .partial()
-        .extend({
-          status: z.enum(["active", "inactive"]).optional(),
-        })
-        .safeParse(request.body)
-      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
       const tenantRules = await loadResolvedTenantRules(auth.tenantId)
       const existing = await productService.getById(auth.tenantId, id)
       if (!existing) return sendError(reply, 404, "not_found", "Product not found")
+      const augmentBase = existing.behaviorProfile?.augmentFlags
+      const parsed = buildProductPatchSchema(tenantRules.capabilities, augmentBase).safeParse(request.body)
+      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
       const nextAugment =
         parsed.data.behaviorAugmentFlags !== undefined
           ? parsed.data.behaviorAugmentFlags

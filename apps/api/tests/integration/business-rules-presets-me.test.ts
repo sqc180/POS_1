@@ -87,6 +87,22 @@ describe("business rules: presets, /me parity, API validation", () => {
     })
     expect(res.statusCode).toBe(400)
   })
+
+  it("POST /products rejects saleUom in body without weight_break_bulk (schemaFactory path)", async () => {
+    const res = await injectJson(ctx.app, "POST", "/products", {
+      headers: authBearer(token),
+      payload: {
+        name: "Uom bad",
+        sku: "BR-UOM-ZOD-1",
+        sellingPrice: 1,
+        gstSlabId: slabId,
+        taxMode: "exclusive",
+        trackStock: false,
+        saleUom: "kg",
+      },
+    })
+    expect(res.statusCode).toBe(400)
+  })
 })
 
 describe("business rules: presets after grocery pilot", () => {

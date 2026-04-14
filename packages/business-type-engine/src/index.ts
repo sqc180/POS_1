@@ -43,6 +43,7 @@ export type {
 export {
   buildProductFieldHintsFromCaps,
   getProductFieldVisibility,
+  isSaleUomGroceryStyle,
   ProductFormFields,
   validateProductFieldsAgainstTenantCaps,
 } from "./product-field-presets"
