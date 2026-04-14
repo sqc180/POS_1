@@ -694,12 +694,15 @@ export default function PosPage() {
               {invoice.invoiceNumber ? <span className="text-muted-foreground">#{invoice.invoiceNumber}</span> : null}
               <span className="text-muted-foreground">Due: ₹{remaining.toFixed(2)}</span>
               {verifyState === "pending" ? (
-                <Badge variant="outline" className="border-amber-500/60 text-amber-700 dark:text-amber-400">
+                <Badge
+                  variant="outline"
+                  className="border-warning/55 bg-warning/10 text-warning-foreground hover:bg-warning/15"
+                >
                   Verifying…
                 </Badge>
               ) : null}
               {verifyState === "verified" ? (
-                <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600">
+                <Badge variant="default" className="bg-success text-success-foreground hover:bg-success/90">
                   Razorpay verified
                 </Badge>
               ) : null}
