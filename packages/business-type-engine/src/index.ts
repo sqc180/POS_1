@@ -6,7 +6,7 @@ export {
   FUTURE_BUSINESS_TYPE_ROADMAP,
   type FutureBusinessTypeSlug,
   resolveActiveBusinessType,
-} from "./future-registry.js"
+} from "./future-registry"
 
 export const BUSINESS_TYPES = ["retail", "supermart"] as const satisfies readonly BusinessTypeId[]
 
