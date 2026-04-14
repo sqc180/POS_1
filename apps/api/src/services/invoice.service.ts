@@ -4,8 +4,36 @@ import { InvoiceModel, type InvoiceDoc } from "../models/invoice.model.js"
 import { ProductModel } from "../models/product.model.js"
 import { auditService } from "./audit.service.js"
 import { numberingService } from "./numbering.service.js"
+import { productSerialService } from "./product-serial.service.js"
+import { stockBatchService } from "./stock-batch.service.js"
 import { stockService } from "./stock.service.js"
-import { taxService, type BuiltLine } from "./tax.service.js"
+import { taxService, type BuiltLine, type LineInput } from "./tax.service.js"
+
+type InvoiceItemSub = {
+  productId: mongoose.Types.ObjectId
+  variantId?: mongoose.Types.ObjectId
+  variantLabel?: string
+  variantSku?: string
+  batchId?: mongoose.Types.ObjectId
+  batchCode?: string
+  expiryDate?: Date
+  serialNumbers?: string[]
+  batchAllocations?: { batchId: mongoose.Types.ObjectId; qty: number }[]
+  name: string
+  sku: string
+  qty: number
+  unitPrice: number
+  taxMode: string
+  gstSlabId?: mongoose.Types.ObjectId
+  cgstRate: number
+  sgstRate: number
+  igstRate: number
+  taxableValue: number
+  cgstAmount: number
+  sgstAmount: number
+  igstAmount: number
+  lineTotal: number
+}
 
 const toPublic = (inv: InvoiceDoc) => ({
   id: inv._id.toString(),
@@ -14,23 +42,37 @@ const toPublic = (inv: InvoiceDoc) => ({
   status: inv.status,
   customerId: inv.customerId?.toString() ?? null,
   cashierId: inv.cashierId.toString(),
-  items: inv.items.map((i) => ({
-    productId: i.productId.toString(),
-    name: i.name,
-    sku: i.sku,
-    qty: i.qty,
-    unitPrice: i.unitPrice,
-    taxMode: i.taxMode,
-    gstSlabId: i.gstSlabId?.toString() ?? null,
-    cgstRate: i.cgstRate,
-    sgstRate: i.sgstRate,
-    igstRate: i.igstRate,
-    taxableValue: i.taxableValue,
-    cgstAmount: i.cgstAmount,
-    sgstAmount: i.sgstAmount,
-    igstAmount: i.igstAmount,
-    lineTotal: i.lineTotal,
-  })),
+  items: inv.items.map((i) => {
+    const row = i as unknown as InvoiceItemSub
+    return {
+      productId: row.productId.toString(),
+      variantId: row.variantId?.toString() ?? null,
+      variantLabel: row.variantLabel ?? "",
+      variantSku: row.variantSku ?? "",
+      batchId: row.batchId?.toString() ?? null,
+      batchCode: row.batchCode ?? "",
+      expiryDate: row.expiryDate?.toISOString?.() ?? null,
+      serialNumbers: row.serialNumbers ?? [],
+      batchAllocations: (row.batchAllocations ?? []).map((b) => ({
+        batchId: b.batchId.toString(),
+        qty: b.qty,
+      })),
+      name: row.name,
+      sku: row.sku,
+      qty: row.qty,
+      unitPrice: row.unitPrice,
+      taxMode: row.taxMode,
+      gstSlabId: row.gstSlabId?.toString() ?? null,
+      cgstRate: row.cgstRate,
+      sgstRate: row.sgstRate,
+      igstRate: row.igstRate,
+      taxableValue: row.taxableValue,
+      cgstAmount: row.cgstAmount,
+      sgstAmount: row.sgstAmount,
+      igstAmount: row.igstAmount,
+      lineTotal: row.lineTotal,
+    }
+  }),
   subtotal: inv.subtotal,
   cgstTotal: inv.cgstTotal,
   sgstTotal: inv.sgstTotal,
@@ -48,6 +90,17 @@ const toPublic = (inv: InvoiceDoc) => ({
 const persistLines = (built: BuiltLine[]) =>
   built.map((l) => ({
     productId: l.productId,
+    variantId: l.variantId,
+    variantLabel: l.variantLabel ?? "",
+    variantSku: l.variantSku ?? "",
+    batchId: l.batchId,
+    batchCode: l.batchCode ?? "",
+    expiryDate: l.expiryDate,
+    serialNumbers: l.serialNumbers ?? [],
+    batchAllocations: (l.batchAllocations ?? []).map((b) => ({
+      batchId: b.batchId,
+      qty: b.qty,
+    })),
     name: l.name,
     sku: l.sku,
     qty: l.qty,
@@ -86,7 +139,7 @@ export const invoiceService = {
   async createDraft(
     tenantId: string,
     actorId: string,
-    input: { customerId?: string; lines: { productId: string; qty: number }[]; notes?: string },
+    input: { customerId?: string; lines: LineInput[]; notes?: string },
   ) {
     const { lines: built } = await taxService.buildLinesFromProducts(tenantId, input.lines)
     const sums = taxService.summarize(built)
@@ -118,7 +171,7 @@ export const invoiceService = {
     tenantId: string,
     actorId: string,
     id: string,
-    input: { customerId?: string | null; lines?: { productId: string; qty: number }[]; notes?: string },
+    input: { customerId?: string | null; lines?: LineInput[]; notes?: string },
   ) {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       const err = new Error("Invalid invoice")
@@ -179,8 +232,57 @@ export const invoiceService = {
     }
     const settings = await BusinessSettingsModel.findOne({ tenantId: new mongoose.Types.ObjectId(tenantId) })
     const branchId = settings?.defaultBranchId ?? "main"
-    const lineInputs = inv.items.map((i) => ({ productId: i.productId.toString(), qty: i.qty }))
+    const lineInputs: LineInput[] = inv.items.map((i) => {
+      const row = i as unknown as InvoiceItemSub
+      return {
+        productId: row.productId.toString(),
+        qty: row.qty,
+        variantId: row.variantId?.toString(),
+        batchId: row.batchId?.toString(),
+        serialNumbers: row.serialNumbers?.length ? [...row.serialNumbers] : undefined,
+      }
+    })
     const { lines: built } = await taxService.buildLinesFromProducts(tenantId, lineInputs)
+
+    let lineIndex = 0
+    for (const l of built) {
+      const p = await ProductModel.findById(l.productId)
+      if (p?.serialTracking) {
+        const serials = l.serialNumbers ?? []
+        await productSerialService.assertAvailableForSale(
+          tenantId,
+          l.productId.toString(),
+          l.variantId?.toString(),
+          serials,
+          l.qty,
+        )
+        await productSerialService.markSold(
+          tenantId,
+          inv._id.toString(),
+          l.productId.toString(),
+          l.variantId?.toString(),
+          serials,
+          lineIndex,
+        )
+      }
+      if (p?.batchTracking) {
+        const alloc = await stockBatchService.allocateConsumption(
+          tenantId,
+          l.productId.toString(),
+          l.variantId?.toString(),
+          branchId,
+          l.qty,
+          l.batchId?.toString(),
+        )
+        l.batchId = alloc.primaryBatchId
+        l.batchCode = alloc.batchCode
+        l.expiryDate = alloc.expiryDate
+        l.batchAllocations = alloc.consumption
+        await stockBatchService.applyConsumption(tenantId, alloc.consumption)
+      }
+      lineIndex += 1
+    }
+
     const sums = taxService.summarize(built)
     inv.items = persistLines(built) as typeof inv.items
     inv.subtotal = sums.subtotal
@@ -191,18 +293,24 @@ export const invoiceService = {
     const { number } = await numberingService.nextInvoiceNumber(tenantId)
     inv.invoiceNumber = number
     inv.status = "completed"
+
     for (const line of inv.items) {
-      const p = await ProductModel.findById(line.productId)
+      const row = line as unknown as InvoiceItemSub
+      const p = await ProductModel.findById(row.productId)
       if (p?.trackStock) {
         await stockService.applyForProduct(
           tenantId,
           actorId,
-          line.productId.toString(),
+          row.productId.toString(),
           branchId,
           "out",
-          line.qty,
+          row.qty,
           "invoice",
           inv._id.toString(),
+          {
+            variantId: row.variantId?.toString(),
+            primaryBatchId: row.batchId?.toString(),
+          },
         )
       }
     }
@@ -261,17 +369,39 @@ export const invoiceService = {
     const settings = await BusinessSettingsModel.findOne({ tenantId: new mongoose.Types.ObjectId(tenantId) })
     const branchId = settings?.defaultBranchId ?? "main"
     for (const line of inv.items) {
-      const p = await ProductModel.findById(line.productId)
+      const row = line as unknown as InvoiceItemSub
+      const p = await ProductModel.findById(row.productId)
       if (p?.trackStock) {
         await stockService.applyForProduct(
           tenantId,
           actorId,
-          line.productId.toString(),
+          row.productId.toString(),
           branchId,
           "in",
-          line.qty,
+          row.qty,
           "invoice_cancel",
           inv._id.toString(),
+          {
+            variantId: row.variantId?.toString(),
+            primaryBatchId: row.batchId?.toString(),
+          },
+        )
+      }
+      const bals = row.batchAllocations ?? []
+      if (bals.length > 0) {
+        await stockBatchService.restoreConsumption(
+          tenantId,
+          bals.map((b) => ({ batchId: b.batchId, qty: b.qty })),
+        )
+      } else if (row.batchId && p?.batchTracking) {
+        await stockBatchService.restoreConsumption(tenantId, [{ batchId: row.batchId, qty: row.qty }])
+      }
+      if (row.serialNumbers?.length) {
+        await productSerialService.markAvailableAfterCancel(
+          tenantId,
+          inv._id.toString(),
+          row.productId.toString(),
+          row.serialNumbers,
         )
       }
     }

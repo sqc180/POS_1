@@ -17,6 +17,15 @@ const productSchema = new Schema(
     unit: { type: String, trim: true },
     imageUrl: { type: String, trim: true },
     status: { type: String, enum: ["active", "inactive"], default: "active" },
+    variantMode: {
+      type: String,
+      enum: ["none", "optional", "required"],
+      default: "none",
+    },
+    /** When true, stock out uses FEFO batch allocation (see StockBatch). */
+    batchTracking: { type: Boolean, default: false },
+    /** When true, completing an invoice requires serialNumbers per line qty. */
+    serialTracking: { type: Boolean, default: false },
   },
   { timestamps: true },
 )

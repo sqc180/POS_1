@@ -39,6 +39,9 @@ type Inv = {
   reorderLevel: number
   lowStockThreshold: number
   openingStock: number
+  variantId?: string | null
+  variantLabel?: string
+  variantSku?: string
 }
 
 type BranchDto = { code: string; name: string; status: string }
@@ -154,6 +157,12 @@ export default function InventoryDetailPage() {
             <div>
               <CardTitle>{row.productName}</CardTitle>
               <CardDescription className="font-mono">{row.sku}</CardDescription>
+              {row.variantLabel ? (
+                <p className="text-sm text-muted-foreground">
+                  Variant: <span className="font-medium text-foreground">{row.variantLabel}</span>
+                  {row.variantSku ? <span className="font-mono"> ({row.variantSku})</span> : null}
+                </p>
+              ) : null}
             </div>
             <Badge variant="secondary" className="shrink-0">
               {branchDisplay}

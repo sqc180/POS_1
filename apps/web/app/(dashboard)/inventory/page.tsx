@@ -6,6 +6,10 @@ import {
   AlertTitle,
   Badge,
   Button,
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
   Select,
   SelectContent,
   SelectItem,
@@ -32,20 +36,35 @@ type Row = {
   reorderLevel: number
   isLowStock: boolean
   branchId: string
+  variantId?: string | null
+  variantLabel?: string
+  variantSku?: string
 }
 
 type BranchDto = { code: string; name: string; status: string }
+
+type NearExpiryBatch = {
+  id: string
+  productId: string
+  variantId: string | null
+  branchId: string
+  batchCode: string
+  expiryDate: string | null
+  qtyOnHand: number
+}
 
 export default function InventoryPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [branchFilter, setBranchFilter] = useState<string>("all")
   const [branchLabels, setBranchLabels] = useState<Map<string, string>>(new Map())
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [nearExpiryBatches, setNearExpiryBatches] = useState<NearExpiryBatch[]>([])
 
   const load = useCallback(async () => {
-    const [invRes, brRes] = await Promise.all([
+    const [invRes, brRes, nearRes] = await Promise.all([
       apiRequest<Row[]>("/inventory"),
       apiRequest<BranchDto[]>("/branches"),
+      apiRequest<NearExpiryBatch[]>("/stock/batches/near-expiry?withinDays=60"),
     ])
     if (invRes.success) {
       setRows(invRes.data)
@@ -56,6 +75,11 @@ export default function InventoryPage() {
     }
     if (brRes.success) {
       setBranchLabels(branchLabelMap(brRes.data))
+    }
+    if (nearRes.success) {
+      setNearExpiryBatches(nearRes.data)
+    } else {
+      setNearExpiryBatches([])
     }
   }, [])
 
@@ -119,6 +143,7 @@ export default function InventoryPage() {
             <TableRow>
               <TableHead>Product</TableHead>
               <TableHead>SKU</TableHead>
+              <TableHead>Variant</TableHead>
               <TableHead>Branch</TableHead>
               <TableHead>On hand</TableHead>
               <TableHead>Reorder</TableHead>
@@ -130,6 +155,9 @@ export default function InventoryPage() {
               <TableRow key={r.id}>
                 <TableCell className="font-medium">{r.productName}</TableCell>
                 <TableCell>{r.sku}</TableCell>
+                <TableCell className="max-w-[10rem] truncate text-muted-foreground">
+                  {r.variantLabel ? `${r.variantLabel} (${r.variantSku ?? ""})` : "—"}
+                </TableCell>
                 <TableCell>{formatBranchLabel(r.branchId, branchLabels)}</TableCell>
                 <TableCell>
                   {r.currentStock}
@@ -150,6 +178,43 @@ export default function InventoryPage() {
           </TableBody>
         </Table>
       </div>
+
+      {nearExpiryBatches.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Batches nearing expiry</CardTitle>
+            <CardDescription>Active batch-tracked stock expiring within the next 60 days (requires stock permission).</CardDescription>
+          </CardHeader>
+          <div className="border-t px-6 pb-6">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Batch</TableHead>
+                  <TableHead>Branch</TableHead>
+                  <TableHead>Expires</TableHead>
+                  <TableHead>Qty</TableHead>
+                  <TableHead className="text-right">Product</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {nearExpiryBatches.map((b) => (
+                  <TableRow key={b.id}>
+                    <TableCell className="font-mono text-sm">{b.batchCode}</TableCell>
+                    <TableCell>{formatBranchLabel(b.branchId, branchLabels)}</TableCell>
+                    <TableCell>{b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : "—"}</TableCell>
+                    <TableCell>{b.qtyOnHand}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="link" className="h-auto p-0" asChild>
+                        <Link href={`/products/${b.productId}`}>Open product</Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </Card>
+      ) : null}
     </div>
   )
 }

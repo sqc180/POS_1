@@ -4,6 +4,8 @@ const stockMovementSchema = new Schema(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: "Tenant", required: true },
     inventoryItemId: { type: Schema.Types.ObjectId, ref: "InventoryItem", required: true },
+    variantId: { type: Schema.Types.ObjectId, ref: "ProductVariant" },
+    batchId: { type: Schema.Types.ObjectId, ref: "StockBatch" },
     type: {
       type: String,
       required: true,

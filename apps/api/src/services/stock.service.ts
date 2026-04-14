@@ -26,6 +26,8 @@ export const stockService = {
       reason?: string
       referenceType?: string
       referenceId?: string
+      variantId?: string
+      batchId?: string
     },
   ) {
     if (!mongoose.Types.ObjectId.isValid(input.inventoryItemId)) {
@@ -69,9 +71,19 @@ export const stockService = {
     }
     item.currentStock = next
     await item.save()
+    const vOid =
+      input.variantId && mongoose.Types.ObjectId.isValid(input.variantId)
+        ? new mongoose.Types.ObjectId(input.variantId)
+        : item.variantId ?? undefined
+    const bOid =
+      input.batchId && mongoose.Types.ObjectId.isValid(input.batchId)
+        ? new mongoose.Types.ObjectId(input.batchId)
+        : undefined
     await StockMovementModel.create({
       tenantId: item.tenantId,
       inventoryItemId: item._id,
+      variantId: vOid,
+      batchId: bOid,
       type: input.type,
       quantity: input.type === "out" ? -q : input.type === "in" ? q : input.quantity,
       reason: input.reason,
@@ -102,17 +114,27 @@ export const stockService = {
     qty: number,
     referenceType: string,
     referenceId: string,
+    opts?: { variantId?: string; primaryBatchId?: string },
   ) {
     if (!mongoose.Types.ObjectId.isValid(productId)) {
       const err = new Error("Invalid product")
       ;(err as Error & { statusCode?: number }).statusCode = 400
       throw err
     }
-    const item = await InventoryItemModel.findOne({
-      tenantId: new mongoose.Types.ObjectId(tenantId),
-      productId: new mongoose.Types.ObjectId(productId),
+    const tenantOid = new mongoose.Types.ObjectId(tenantId)
+    const productOid = new mongoose.Types.ObjectId(productId)
+    const variantOid =
+      opts?.variantId && mongoose.Types.ObjectId.isValid(opts.variantId)
+        ? new mongoose.Types.ObjectId(opts.variantId)
+        : null
+    const invFilter: Record<string, unknown> = {
+      tenantId: tenantOid,
+      productId: productOid,
       branchId,
-    })
+    }
+    if (variantOid) invFilter.variantId = variantOid
+    else invFilter.$or = [{ variantId: null }, { variantId: { $exists: false } }]
+    const item = await InventoryItemModel.findOne(invFilter)
     const settings = await BusinessSettingsModel.findOne({ tenantId: new mongoose.Types.ObjectId(tenantId) })
     const allowNegative = settings?.allowNegativeStock ?? false
     const q = Math.abs(qty)
@@ -142,6 +164,8 @@ export const stockService = {
       reason: `Invoice ${referenceType}`,
       referenceType,
       referenceId,
+      variantId: variantOid ? variantOid.toString() : undefined,
+      batchId: opts?.primaryBatchId,
     })
   },
 

@@ -18,6 +18,9 @@ import { gstSlabService } from "../services/gst-slab.service.js"
 import { inventoryService } from "../services/inventory.service.js"
 import { meService, userService } from "../services/user.service.js"
 import { productService } from "../services/product.service.js"
+import { productVariantService } from "../services/product-variant.service.js"
+import { productSerialService } from "../services/product-serial.service.js"
+import { stockBatchService } from "../services/stock-batch.service.js"
 import { stockService } from "../services/stock.service.js"
 import { supplierService } from "../services/supplier.service.js"
 import { permissionForDocumentType } from "../lib/document-permission.js"
@@ -375,6 +378,123 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       return reply.send({ success: true, data })
     })
 
+    app.get(
+      "/products/:productId/variants",
+      { preHandler: [requirePermission(Permission.products)] },
+      async (request, reply) => {
+        const auth = request.auth!
+        const { productId } = request.params as { productId: string }
+        const data = await productVariantService.listByProduct(auth.tenantId, productId)
+        return reply.send({ success: true, data })
+      },
+    )
+
+    const variantCreateSchema = z.object({
+      label: z.string().min(1),
+      sku: z.string().min(1),
+      barcode: z.string().optional(),
+      sellingPrice: z.number().nonnegative().optional(),
+      gstSlabId: z.string().optional(),
+      taxMode: z.enum(["inclusive", "exclusive"]).optional(),
+    })
+
+    app.post(
+      "/products/:productId/variants",
+      { preHandler: [requirePermission(Permission.products)] },
+      async (request, reply) => {
+        const auth = request.auth!
+        const { productId } = request.params as { productId: string }
+        const parsed = variantCreateSchema.safeParse(request.body)
+        if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+        try {
+          const data = await productVariantService.create(auth.tenantId, auth.userId, productId, parsed.data)
+          return reply.status(201).send({ success: true, data })
+        } catch (e: unknown) {
+          const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+          if (e && typeof e === "object" && "code" in e && (e as { code?: number }).code === 11000) {
+            return sendError(reply, 409, "duplicate", "Variant SKU must be unique for this tenant")
+          }
+          return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+        }
+      },
+    )
+
+    app.patch(
+      "/products/:productId/variants/:variantId",
+      { preHandler: [requirePermission(Permission.products)] },
+      async (request, reply) => {
+        const auth = request.auth!
+        const { productId, variantId } = request.params as { productId: string; variantId: string }
+        const parsed = variantCreateSchema.partial().extend({ status: z.enum(["active", "inactive"]).optional() }).safeParse(request.body)
+        if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+        try {
+          const data = await productVariantService.update(auth.tenantId, auth.userId, productId, variantId, parsed.data)
+          return reply.send({ success: true, data })
+        } catch (e: unknown) {
+          const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+          return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+        }
+      },
+    )
+
+    app.post(
+      "/products/:productId/variants/:variantId/deactivate",
+      { preHandler: [requirePermission(Permission.products)] },
+      async (request, reply) => {
+        const auth = request.auth!
+        const { productId, variantId } = request.params as { productId: string; variantId: string }
+        try {
+          const data = await productVariantService.deactivateIfNoStock(auth.tenantId, auth.userId, productId, variantId)
+          return reply.send({ success: true, data })
+        } catch (e: unknown) {
+          const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+          return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+        }
+      },
+    )
+
+    const serialRegisterSchema = z.object({
+      serialNumber: z.string().min(1),
+      variantId: z.string().optional(),
+    })
+
+    app.get(
+      "/products/:productId/serials",
+      { preHandler: [requirePermission(Permission.products)] },
+      async (request, reply) => {
+        const auth = request.auth!
+        const { productId } = request.params as { productId: string }
+        const status = (request.query as { status?: string }).status
+        const data = await productSerialService.listForProduct(auth.tenantId, productId, status)
+        return reply.send({ success: true, data })
+      },
+    )
+
+    app.post(
+      "/products/:productId/serials",
+      { preHandler: [requirePermission(Permission.products)] },
+      async (request, reply) => {
+        const auth = request.auth!
+        const { productId } = request.params as { productId: string }
+        const parsed = serialRegisterSchema.safeParse(request.body)
+        if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+        try {
+          const data = await productSerialService.register(auth.tenantId, auth.userId, {
+            productId,
+            variantId: parsed.data.variantId,
+            serialNumber: parsed.data.serialNumber,
+          })
+          return reply.status(201).send({ success: true, data })
+        } catch (e: unknown) {
+          const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+          if (e && typeof e === "object" && "code" in e && (e as { code?: number }).code === 11000) {
+            return sendError(reply, 409, "duplicate", "Serial number already exists")
+          }
+          return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+        }
+      },
+    )
+
     app.get("/products/:id", { preHandler: [requirePermission(Permission.products)] }, async (request, reply) => {
       const auth = request.auth!
       const { id } = request.params as { id: string }
@@ -397,6 +517,9 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       brand: z.string().optional(),
       unit: z.string().optional(),
       imageUrl: z.string().optional(),
+      variantMode: z.enum(["none", "optional", "required"]).optional(),
+      batchTracking: z.boolean().optional(),
+      serialTracking: z.boolean().optional(),
     })
 
     app.post("/products", { preHandler: [requirePermission(Permission.products)] }, async (request, reply) => {
@@ -417,7 +540,12 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
     app.patch("/products/:id", { preHandler: [requirePermission(Permission.products)] }, async (request, reply) => {
       const auth = request.auth!
       const { id } = request.params as { id: string }
-      const parsed = productSchema.partial().extend({ status: z.enum(["active", "inactive"]).optional() }).safeParse(request.body)
+      const parsed = productSchema
+        .partial()
+        .extend({
+          status: z.enum(["active", "inactive"]).optional(),
+        })
+        .safeParse(request.body)
       if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
       try {
         const data = await productService.update(auth.tenantId, auth.userId, id, parsed.data)
@@ -525,6 +653,45 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
         const status = (e as Error & { statusCode?: number }).statusCode ?? 400
         return sendError(reply, status, "stock_error", e instanceof Error ? e.message : "Failed")
       }
+    })
+
+    const batchReceiveSchema = z.object({
+      productId: z.string(),
+      variantId: z.string().optional(),
+      branchId: z.string().optional(),
+      batchCode: z.string().min(1),
+      qty: z.number().positive(),
+      mfgDate: z.string().optional(),
+      expiryDate: z.string().optional(),
+    })
+
+    app.post("/stock/batches/receive", { preHandler: [requirePermission(Permission.stock)] }, async (request, reply) => {
+      const auth = request.auth!
+      const parsed = batchReceiveSchema.safeParse(request.body)
+      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+      try {
+        const data = await stockBatchService.receive(auth.tenantId, auth.userId, {
+          productId: parsed.data.productId,
+          variantId: parsed.data.variantId,
+          branchId: parsed.data.branchId ?? "main",
+          batchCode: parsed.data.batchCode,
+          qty: parsed.data.qty,
+          mfgDate: parsed.data.mfgDate,
+          expiryDate: parsed.data.expiryDate,
+        })
+        return reply.status(201).send({ success: true, data })
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
+    app.get("/stock/batches/near-expiry", { preHandler: [requirePermission(Permission.stock)] }, async (request, reply) => {
+      const auth = request.auth!
+      const within = Number.parseInt((request.query as { withinDays?: string }).withinDays ?? "30", 10)
+      const withinDays = Number.isFinite(within) && within > 0 ? within : 30
+      const data = await stockBatchService.listNearExpiry(auth.tenantId, withinDays)
+      return reply.send({ success: true, data })
     })
 
     app.get("/stock/history", { preHandler: [requirePermission(Permission.stock)] }, async (request, reply) => {
@@ -706,11 +873,19 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       return reply.send({ success: true, data })
     })
 
+    const posLineSchema = z.object({
+      productId: z.string(),
+      qty: z.number().positive(),
+      variantId: z.string().optional(),
+      batchId: z.string().optional(),
+      serialNumbers: z.array(z.string()).optional(),
+    })
+
     app.post("/pos/preview", { preHandler: [requirePermission(Permission.pos)] }, async (request, reply) => {
       const auth = request.auth!
       const parsed = z
         .object({
-          lines: z.array(z.object({ productId: z.string(), qty: z.number().positive() })).min(1),
+          lines: z.array(posLineSchema).min(1),
         })
         .safeParse(request.body)
       if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
@@ -732,7 +907,7 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
 
     const invoiceDraftSchema = z.object({
       customerId: z.string().optional(),
-      lines: z.array(z.object({ productId: z.string(), qty: z.number().positive() })).min(1),
+      lines: z.array(posLineSchema).min(1),
       notes: z.string().optional(),
     })
 

@@ -2,13 +2,19 @@ import mongoose from "mongoose"
 import { BusinessSettingsModel } from "../models/business-settings.model.js"
 import { InventoryItemModel, type InventoryItemDoc } from "../models/inventory-item.model.js"
 import { ProductModel } from "../models/product.model.js"
+import { ProductVariantModel } from "../models/product-variant.model.js"
 
 const toPublic = async (i: InventoryItemDoc) => {
   const product = await ProductModel.findById(i.productId)
+  const vid = (i as { variantId?: mongoose.Types.ObjectId }).variantId
+  const variant = vid ? await ProductVariantModel.findById(vid).lean() : null
   return {
     id: i._id.toString(),
     tenantId: i.tenantId.toString(),
     productId: i.productId.toString(),
+    variantId: vid?.toString() ?? null,
+    variantLabel: variant ? (variant as { label: string }).label : "",
+    variantSku: variant ? (variant as { sku: string }).sku : "",
     productName: product?.name ?? "",
     sku: product?.sku ?? "",
     branchId: i.branchId,

@@ -52,6 +52,9 @@ type ProductRow = {
   sellingPrice: number
   status: string
   trackStock: boolean
+  variantMode?: "none" | "optional" | "required"
+  batchTracking?: boolean
+  serialTracking?: boolean
 }
 
 type CategoryRow = { id: string; name: string }
@@ -368,7 +371,20 @@ export default function ProductsPage() {
           <TableBody>
             {rows.map((p) => (
               <TableRow key={p.id}>
-                <TableCell className="font-medium">{p.name}</TableCell>
+                <TableCell className="font-medium">
+                  <span className="block">{p.name}</span>
+                  {p.variantMode && p.variantMode !== "none" ? (
+                    <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                      Variants: {p.variantMode}
+                      {p.batchTracking ? " · Batch" : ""}
+                      {p.serialTracking ? " · Serial" : ""}
+                    </span>
+                  ) : p.batchTracking || p.serialTracking ? (
+                    <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                      {[p.batchTracking ? "Batch" : null, p.serialTracking ? "Serial" : null].filter(Boolean).join(" · ")}
+                    </span>
+                  ) : null}
+                </TableCell>
                 <TableCell>{p.sku}</TableCell>
                 <TableCell>₹{p.sellingPrice.toFixed(2)}</TableCell>
                 <TableCell>

@@ -2,7 +2,10 @@ import mongoose from "mongoose"
 import type { TaxMode } from "@repo/types"
 import { InventoryItemModel } from "../models/inventory-item.model.js"
 import { ProductModel, type ProductDoc } from "../models/product.model.js"
+import { ProductVariantModel } from "../models/product-variant.model.js"
 import { auditService } from "./audit.service.js"
+
+export type VariantMode = "none" | "optional" | "required"
 
 const toPublic = (p: ProductDoc) => ({
   id: p._id.toString(),
@@ -21,8 +24,18 @@ const toPublic = (p: ProductDoc) => ({
   unit: p.unit ?? "",
   imageUrl: p.imageUrl ?? "",
   status: p.status,
+  variantMode: (p.variantMode as VariantMode | undefined) ?? "none",
+  batchTracking: p.batchTracking === true,
+  serialTracking: p.serialTracking === true,
   createdAt: p.createdAt?.toISOString?.() ?? "",
   updatedAt: p.updatedAt?.toISOString?.() ?? "",
+})
+
+const baseInventoryFilter = (tenantId: mongoose.Types.ObjectId, productId: mongoose.Types.ObjectId) => ({
+  tenantId,
+  productId,
+  branchId: "main",
+  $or: [{ variantId: null }, { variantId: { $exists: false } }],
 })
 
 export const productService = {
@@ -67,8 +80,17 @@ export const productService = {
       brand?: string
       unit?: string
       imageUrl?: string
+      variantMode?: VariantMode
+      batchTracking?: boolean
+      serialTracking?: boolean
     },
   ) {
+    const variantMode = input.variantMode ?? "none"
+    if (input.serialTracking && input.batchTracking) {
+      const err = new Error("Cannot enable both batch and serial tracking on the same product")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
     const p = await ProductModel.create({
       tenantId: new mongoose.Types.ObjectId(tenantId),
       name: input.name,
@@ -89,11 +111,17 @@ export const productService = {
       unit: input.unit,
       imageUrl: input.imageUrl,
       status: "active",
+      variantMode,
+      batchTracking: input.batchTracking ?? false,
+      serialTracking: input.serialTracking ?? false,
     })
-    if (p.trackStock) {
+    const shouldCreateBaseInventory =
+      p.trackStock && (variantMode === "none" || variantMode === "optional")
+    if (shouldCreateBaseInventory) {
       await InventoryItemModel.create({
         tenantId: p.tenantId,
         productId: p._id,
+        variantId: null,
         branchId: "main",
         openingStock: 0,
         currentStock: 0,
@@ -131,6 +159,9 @@ export const productService = {
       unit: string
       imageUrl: string
       status: string
+      variantMode: VariantMode
+      batchTracking: boolean
+      serialTracking: boolean
     }>,
   ) {
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -172,24 +203,50 @@ export const productService = {
     if (input.unit !== undefined) p.unit = input.unit
     if (input.imageUrl !== undefined) p.imageUrl = input.imageUrl
     if (input.status !== undefined) p.status = input.status as "active" | "inactive"
-    await p.save()
-    if (!wasTrack && p.trackStock) {
-      const existing = await InventoryItemModel.findOne({
-        tenantId: p.tenantId,
-        productId: p._id,
-        branchId: "main",
-      })
-      if (!existing) {
-        await InventoryItemModel.create({
+    if (input.variantMode !== undefined) {
+      if (input.variantMode === "required") {
+        const n = await ProductVariantModel.countDocuments({
           tenantId: p.tenantId,
           productId: p._id,
-          branchId: "main",
-          openingStock: 0,
-          currentStock: 0,
-          reservedStock: 0,
-          reorderLevel: 0,
-          lowStockThreshold: 0,
+          status: "active",
         })
+        if (n < 1) {
+          const err = new Error("Add at least one active variant before setting variant mode to required")
+          ;(err as Error & { statusCode?: number }).statusCode = 400
+          throw err
+        }
+      }
+      p.variantMode = input.variantMode
+    }
+    if (input.batchTracking !== undefined || input.serialTracking !== undefined) {
+      const nextBatch = input.batchTracking !== undefined ? input.batchTracking : p.batchTracking
+      const nextSerial = input.serialTracking !== undefined ? input.serialTracking : p.serialTracking
+      if (nextBatch && nextSerial) {
+        const err = new Error("Cannot enable both batch and serial tracking on the same product")
+        ;(err as Error & { statusCode?: number }).statusCode = 400
+        throw err
+      }
+      if (input.batchTracking !== undefined) p.batchTracking = input.batchTracking
+      if (input.serialTracking !== undefined) p.serialTracking = input.serialTracking
+    }
+    await p.save()
+    if (!wasTrack && p.trackStock) {
+      const mode = ((p.variantMode as VariantMode | undefined) ?? "none") as VariantMode
+      if (mode === "none" || mode === "optional") {
+        const existing = await InventoryItemModel.findOne(baseInventoryFilter(p.tenantId, p._id))
+        if (!existing) {
+          await InventoryItemModel.create({
+            tenantId: p.tenantId,
+            productId: p._id,
+            variantId: null,
+            branchId: "main",
+            openingStock: 0,
+            currentStock: 0,
+            reservedStock: 0,
+            reorderLevel: 0,
+            lowStockThreshold: 0,
+          })
+        }
       }
     }
     await auditService.log({

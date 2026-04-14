@@ -3,6 +3,23 @@ import mongoose, { Schema, type InferSchemaType } from "mongoose"
 const invoiceItemSchema = new Schema(
   {
     productId: { type: Schema.Types.ObjectId, ref: "Product", required: true },
+    variantId: { type: Schema.Types.ObjectId, ref: "ProductVariant" },
+    variantLabel: { type: String, default: "" },
+    variantSku: { type: String, default: "" },
+    batchId: { type: Schema.Types.ObjectId, ref: "StockBatch" },
+    batchCode: { type: String, default: "" },
+    expiryDate: { type: Date },
+    serialNumbers: { type: [String], default: [] },
+    batchAllocations: {
+      type: [
+        {
+          _id: false,
+          batchId: { type: Schema.Types.ObjectId, ref: "StockBatch", required: true },
+          qty: { type: Number, required: true },
+        },
+      ],
+      default: [],
+    },
     name: { type: String, required: true },
     sku: { type: String, default: "" },
     qty: { type: Number, required: true, min: 0 },

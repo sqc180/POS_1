@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "crypto"
 import type { Readable } from "stream"
 import mongoose from "mongoose"
 import type { FileAssetDocumentType, FileAssetModule, FileAssetPublic } from "@repo/types"
-import { buildDocumentRelativePath } from "../storage/path-utils.js"
+import { assertSafeRelativePath, buildDocumentRelativePath } from "../storage/path-utils.js"
 import type { StorageProvider } from "../storage/storage-provider.types.js"
 import { FileAssetModel, type FileAssetDoc } from "../models/file-asset.model.js"
 import { InvoiceModel } from "../models/invoice.model.js"
@@ -66,7 +66,10 @@ export const createStoredDocumentService = (
   }): Promise<FileAssetDoc> => {
     const checksumSha256 = createHash("sha256").update(input.buffer).digest("hex")
     const storedFileName = `${randomUUID()}.${input.extension}`
-    const relativePath = buildDocumentRelativePath(input.tenantId, input.folder, storedFileName, pdfPrefix)
+    const innerPath = buildDocumentRelativePath(input.tenantId, input.folder, storedFileName)
+    const relativePath =
+      pdfPrefix && pdfPrefix.length > 0 ? `${pdfPrefix.replace(/\/+$/, "")}/${innerPath}` : innerPath
+    assertSafeRelativePath(relativePath)
     await storage.saveFile({
       relativePath,
       buffer: input.buffer,
