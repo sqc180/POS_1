@@ -18,6 +18,7 @@ import {
   CommandList,
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   Input,
@@ -920,10 +921,10 @@ export default function PosPage() {
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Choose variant</DialogTitle>
+                <DialogDescription>
+                  {variantPickerProduct ? `${variantPickerProduct.name} — pick a SKU variant for this line.` : "Pick a SKU variant for this line."}
+                </DialogDescription>
               </DialogHeader>
-              <p className="text-sm text-muted-foreground">
-                {variantPickerProduct ? `${variantPickerProduct.name} — pick a SKU variant for this line.` : ""}
-              </p>
               <div className="flex max-h-72 flex-col gap-2 overflow-y-auto py-2">
                 {variantList.map((v) => (
                   <Button

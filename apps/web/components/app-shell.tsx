@@ -18,6 +18,9 @@ import {
   Separator,
   Sheet,
   SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
   SheetTrigger,
   Tooltip,
   TooltipContent,
@@ -312,6 +315,10 @@ export const AppShell = ({
               side="left"
               className="w-[min(100vw-1rem,20rem)] border-sidebar-border bg-sidebar p-0 text-sidebar-foreground sm:max-w-md"
             >
+              <SheetHeader className="sr-only">
+                <SheetTitle>Main menu</SheetTitle>
+                <SheetDescription>Workspace navigation and module links for small screens.</SheetDescription>
+              </SheetHeader>
               <div className="border-b border-sidebar-border px-4 py-4">
                 <p className="text-[0.65rem] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
                   Workspace
