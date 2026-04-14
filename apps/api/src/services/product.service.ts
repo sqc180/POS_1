@@ -1,8 +1,10 @@
 import mongoose from "mongoose"
+import { isProductBehaviorProfileId, validateProductFieldsAgainstTenantCaps } from "@repo/business-type-engine"
 import type { TaxMode } from "@repo/types"
 import { InventoryItemModel } from "../models/inventory-item.model.js"
 import { ProductModel, type ProductDoc } from "../models/product.model.js"
 import { ProductVariantModel } from "../models/product-variant.model.js"
+import { loadResolvedTenantRules } from "../lib/ruleResolver.js"
 import { auditService } from "./audit.service.js"
 
 export type VariantMode = "none" | "optional" | "required"
@@ -32,9 +34,37 @@ const toPublic = (p: ProductDoc) => ({
   serialTracking: p.serialTracking === true,
   saleUom: (p as { saleUom?: string }).saleUom?.trim() ? String((p as { saleUom?: string }).saleUom).trim() : "",
   isLoose: (p as { isLoose?: boolean }).isLoose === true,
+  behaviorProfileId: (p as { behaviorProfileId?: string }).behaviorProfileId?.trim()
+    ? String((p as { behaviorProfileId?: string }).behaviorProfileId).trim()
+    : null,
+  behaviorProfile: {
+    augmentFlags: [
+      ...(((p as { behaviorProfile?: { augmentFlags?: string[] } }).behaviorProfile?.augmentFlags ?? []) as string[]),
+    ].filter(Boolean),
+  },
   createdAt: p.createdAt?.toISOString?.() ?? "",
   updatedAt: p.updatedAt?.toISOString?.() ?? "",
 })
+
+const tenantPilotCaps = async (tenantId: string): Promise<string[]> => {
+  const r = await loadResolvedTenantRules(tenantId)
+  return [...r.capabilities]
+}
+
+const assertGroceryFieldsAllowed = async (
+  tenantId: string,
+  augmentFlags: readonly string[] | undefined,
+  saleUom: string | undefined,
+  isLoose: boolean | undefined,
+): Promise<void> => {
+  const caps = await tenantPilotCaps(tenantId)
+  const msg = validateProductFieldsAgainstTenantCaps(caps, { saleUom, isLoose, behaviorAugmentFlags: augmentFlags })
+  if (msg) {
+    const err = new Error(msg)
+    ;(err as Error & { statusCode?: number }).statusCode = 400
+    throw err
+  }
+}
 
 const baseInventoryFilter = (tenantId: mongoose.Types.ObjectId, productId: mongoose.Types.ObjectId) => ({
   tenantId,
@@ -132,11 +162,23 @@ export const productService = {
       catalogLifecycle?: "active" | "discontinued" | "archived"
       saleUom?: string
       isLoose?: boolean
+      behaviorAugmentFlags?: string[]
+      behaviorProfileId?: string | null
     },
   ) {
     const variantMode = input.variantMode ?? "none"
     if (input.serialTracking && input.batchTracking) {
       const err = new Error("Cannot enable both batch and serial tracking on the same product")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    await assertGroceryFieldsAllowed(tenantId, input.behaviorAugmentFlags, input.saleUom, input.isLoose)
+    const profileId =
+      input.behaviorProfileId !== undefined && input.behaviorProfileId !== null && String(input.behaviorProfileId).trim() !== ""
+        ? String(input.behaviorProfileId).trim()
+        : undefined
+    if (profileId !== undefined && !isProductBehaviorProfileId(profileId)) {
+      const err = new Error("Invalid behavior profile id")
       ;(err as Error & { statusCode?: number }).statusCode = 400
       throw err
     }
@@ -168,6 +210,10 @@ export const productService = {
       serialTracking: input.serialTracking ?? false,
       saleUom: input.saleUom?.trim(),
       isLoose: input.isLoose ?? false,
+      ...(profileId !== undefined ? { behaviorProfileId: profileId } : {}),
+      behaviorProfile: {
+        augmentFlags: [...(input.behaviorAugmentFlags ?? [])].map((s) => String(s).trim()).filter(Boolean),
+      },
     })
     const shouldCreateBaseInventory =
       p.trackStock && (variantMode === "none" || variantMode === "optional")
@@ -221,6 +267,8 @@ export const productService = {
       catalogLifecycle: "active" | "discontinued" | "archived"
       saleUom: string
       isLoose: boolean
+      behaviorAugmentFlags: string[]
+      behaviorProfileId: string | null
     }>,
   ) {
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -237,6 +285,13 @@ export const productService = {
       ;(err as Error & { statusCode?: number }).statusCode = 404
       throw err
     }
+    const nextAugment =
+      input.behaviorAugmentFlags !== undefined
+        ? [...input.behaviorAugmentFlags].map((s) => String(s).trim()).filter(Boolean)
+        : (((p as { behaviorProfile?: { augmentFlags?: string[] } }).behaviorProfile?.augmentFlags ?? []) as string[])
+    const nextSaleUom = input.saleUom !== undefined ? input.saleUom.trim() : String((p as { saleUom?: string }).saleUom ?? "").trim()
+    const nextIsLoose = input.isLoose !== undefined ? input.isLoose : (p as { isLoose?: boolean }).isLoose === true
+    await assertGroceryFieldsAllowed(tenantId, nextAugment, nextSaleUom || undefined, nextIsLoose)
     const wasTrack = p.trackStock
     if (input.name !== undefined) p.name = input.name
     if (input.sku !== undefined) p.sku = input.sku
@@ -272,6 +327,24 @@ export const productService = {
     }
     if (input.isLoose !== undefined) {
       ;(p as { isLoose?: boolean }).isLoose = input.isLoose
+    }
+    if (input.behaviorAugmentFlags !== undefined) {
+      ;(p as { behaviorProfile?: { augmentFlags: string[] } }).behaviorProfile = {
+        ...((p as { behaviorProfile?: { augmentFlags?: string[] } }).behaviorProfile ?? {}),
+        augmentFlags: [...input.behaviorAugmentFlags].map((s) => String(s).trim()).filter(Boolean),
+      }
+    }
+    if (input.behaviorProfileId !== undefined) {
+      const raw = input.behaviorProfileId === null ? "" : String(input.behaviorProfileId).trim()
+      if (raw === "") {
+        ;(p as { behaviorProfileId?: string }).behaviorProfileId = undefined
+      } else if (!isProductBehaviorProfileId(raw)) {
+        const err = new Error("Invalid behavior profile id")
+        ;(err as Error & { statusCode?: number }).statusCode = 400
+        throw err
+      } else {
+        ;(p as { behaviorProfileId?: string }).behaviorProfileId = raw
+      }
     }
     if (input.variantMode !== undefined) {
       if (input.variantMode === "required") {

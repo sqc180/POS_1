@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { VerticalCapability } from "@repo/business-type-engine"
 import { signAccessToken } from "../../src/lib/jwt.js"
 import { authBearer, injectJson, parseJson } from "../helpers/http.js"
 import { openTestApp } from "../helpers/context.js"
@@ -37,6 +38,38 @@ describe("health + auth", () => {
     })
     expect(data.tenantId).toMatch(/^[a-f0-9]{24}$/)
     expect(data.userId).toMatch(/^[a-f0-9]{24}$/)
+  })
+
+  it("POST /auth/onboarding accepts pilotVertical and GET /me exposes capabilities and behaviorHints", async () => {
+    const email = `pharm-onboard-${Date.now()}@qa.test`
+    const res = await injectJson(ctx.app, "POST", "/auth/onboarding", {
+      payload: {
+        businessName: "Pharm onboard co",
+        businessType: "retail",
+        ownerEmail: email,
+        ownerPassword: "password123",
+        ownerName: "Owner",
+        pilotVertical: "pharmacy",
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    const data = parseJson<{ success: true; data: { token: string } }>(res.body).data
+    const me = await injectJson(ctx.app, "GET", "/me", { headers: authBearer(data.token) })
+    expect(me.statusCode).toBe(200)
+    const body = parseJson<{
+      success: true
+      data: {
+        tenant: {
+          capabilities: string[]
+          pilotVertical?: string | null
+          behaviorHints?: { posShellRoute?: string | null; defaultPosMode?: string }
+        }
+      }
+    }>(me.body)
+    expect(body.data.tenant.pilotVertical).toBe("pharmacy")
+    expect(body.data.tenant.capabilities).toContain(VerticalCapability.batchExpiry)
+    expect(body.data.tenant.behaviorHints?.posShellRoute).toBe("/pos/pharmacy")
+    expect(body.data.tenant.behaviorHints?.defaultPosMode).toBe("standard")
   })
 
   it("POST /auth/onboarding rejects invalid email", async () => {

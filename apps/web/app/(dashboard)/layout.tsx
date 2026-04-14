@@ -7,6 +7,7 @@ import { Skeleton } from "@repo/ui"
 import { useRouter } from "next/navigation"
 import { useEffect, type ReactNode } from "react"
 import { getToken } from "@/lib/auth-storage"
+import { applyPosBehaviorToNav } from "@/lib/resolve-pos-nav"
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth()
@@ -26,7 +27,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     )
   }
 
-  const baseNav = me.menu.map((m) => ({ id: m.id, label: m.label, href: m.href }))
+  const menuPos = me.menu.find((m) => m.id === "pos")
+  const hintsForPos =
+    me.contextBranchCode && me.branchBehaviorHints ? me.branchBehaviorHints : me.tenant.behaviorHints
+  const baseNav = applyPosBehaviorToNav(
+    me.menu.map((m) => ({ id: m.id, label: m.label, href: m.href })),
+    hintsForPos,
+    menuPos?.href ?? "/pos",
+  )
   const hasGuide = baseNav.some((n) => n.id === "guide")
   const nav: ShellNavItem[] = hasGuide
     ? baseNav

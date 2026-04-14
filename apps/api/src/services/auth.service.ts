@@ -73,11 +73,16 @@ export const authService = {
       ownerEmail: string
       ownerPassword: string
       ownerName: string
+      pilotVertical?: string | null
+      enabledPackIds?: string[]
     },
   ): Promise<{ token: string; tenantId: string; userId: string }> {
     // No mongoose transaction: standalone MongoDB (typical local dev) does not support
     // transactions unless the server is a replica set or mongos. Use ordered writes + rollback.
     const email = normalizeEmail(input.ownerEmail)
+    const pilot =
+      input.pilotVertical && String(input.pilotVertical).trim() !== "" ? String(input.pilotVertical).trim() : null
+    const packIds = [...(input.enabledPackIds ?? [])].map((s) => String(s).trim()).filter(Boolean)
     let tenantId: mongoose.Types.ObjectId | null = null
     let token = ""
     let tid = ""
@@ -87,6 +92,8 @@ export const authService = {
         name: input.businessName.trim(),
         businessType: input.businessType,
         status: "active",
+        pilotVertical: pilot,
+        enabledPackIds: packIds,
       })
       tenantId = tenant._id
 
@@ -168,7 +175,11 @@ export const authService = {
         action: "tenant.onboarding",
         entity: "Tenant",
         entityId: tid,
-        metadata: { businessType: input.businessType },
+        metadata: {
+          businessType: input.businessType,
+          pilotVertical: pilot,
+          enabledPackIds: packIds,
+        },
       })
     } catch {
       /* audit failure must not roll back a successful tenant */

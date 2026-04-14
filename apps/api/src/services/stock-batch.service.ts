@@ -1,4 +1,10 @@
 import mongoose from "mongoose"
+import { resolveProductBehavior } from "@repo/business-type-engine"
+import {
+  inventoryReceiveStrategyRequiresExpiryDate,
+  selectInventoryReceiveStrategy,
+} from "../modules/rules/inventory-receive-strategy.js"
+import { loadResolvedRulesWithOptionalBranch } from "../lib/ruleResolver.js"
 import { InventoryItemModel } from "../models/inventory-item.model.js"
 import { ProductModel } from "../models/product.model.js"
 import { StockBatchModel, type StockBatchDoc } from "../models/stock-batch.model.js"
@@ -33,6 +39,27 @@ export const stockBatchService = {
       const err = new Error("Batch tracking is not enabled for this product")
       ;(err as Error & { statusCode?: number }).statusCode = 400
       throw err
+    }
+    const resolved = await loadResolvedRulesWithOptionalBranch(tenantId, String(input.branchId).trim())
+    const eff = resolveProductBehavior(
+      {
+        batchTracking: p.batchTracking === true,
+        serialTracking: p.serialTracking === true,
+        saleUom: (p as { saleUom?: string }).saleUom,
+        isLoose: (p as { isLoose?: boolean }).isLoose === true,
+        behaviorProfileId: (p as { behaviorProfileId?: string }).behaviorProfileId,
+        behaviorProfile: (p as { behaviorProfile?: { augmentFlags?: string[] } }).behaviorProfile,
+      },
+      resolved.capabilities,
+    ).mergedCapabilities
+    const receiveStrategy = selectInventoryReceiveStrategy(eff)
+    if (inventoryReceiveStrategyRequiresExpiryDate(receiveStrategy)) {
+      const exp = input.expiryDate?.trim()
+      if (!exp) {
+        const err = new Error("Expiry date is required for batch receive when batch/expiry capability is active")
+        ;(err as Error & { statusCode?: number }).statusCode = 400
+        throw err
+      }
     }
     const variantOid =
       input.variantId && mongoose.Types.ObjectId.isValid(input.variantId)

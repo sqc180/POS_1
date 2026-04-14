@@ -1,11 +1,11 @@
 import mongoose from "mongoose"
-import { getCreditPolicyForCapabilities, resolveVerticalCapabilities } from "@repo/business-type-engine"
+import { getCreditPolicyForCapabilities } from "@repo/business-type-engine"
 import { canCreateUserOrSetPassword } from "@repo/permissions"
 import type { UserRole } from "@repo/types"
 import { BusinessSettingsModel } from "../models/business-settings.model.js"
 import { InvoiceModel, type InvoiceDoc } from "../models/invoice.model.js"
 import { ProductModel } from "../models/product.model.js"
-import { TenantModel } from "../models/tenant.model.js"
+import { loadResolvedRulesWithOptionalBranch } from "../lib/ruleResolver.js"
 import { auditService } from "./audit.service.js"
 import { customerService } from "./customer.service.js"
 import { numberingService } from "./numbering.service.js"
@@ -310,9 +310,8 @@ export const invoiceService = {
     inv.igstTotal = sums.igstTotal
     inv.grandTotal = sums.grandTotal
 
-    const tenantRow = await TenantModel.findById(new mongoose.Types.ObjectId(tenantId))
-    const pilotRaw = (tenantRow as { pilotVertical?: string | null } | null)?.pilotVertical ?? null
-    const caps = resolveVerticalCapabilities(pilotRaw)
+    const resolved = await loadResolvedRulesWithOptionalBranch(tenantId, branchId)
+    const caps = resolved.capabilities
     const creditHint = getCreditPolicyForCapabilities(caps)
     if (creditHint.atComplete === "audit_over_limit" && inv.customerId) {
       const snap = await customerService.getReceivableSnapshot(tenantId, inv.customerId.toString())

@@ -8,17 +8,76 @@ export {
   resolveActiveBusinessType,
 } from "./future-registry"
 
+export { VerticalCapability } from "./vertical-capability-codes"
+
 export {
-  VerticalCapability,
   assertPilotCapabilityMapComplete,
   getCreditPolicyForCapabilities,
   hasVerticalCapability,
   isPilotVerticalSlug,
+  mergeProductAugmentedCapabilities,
   PILOT_VERTICAL_SLUGS,
+  resolveEffectiveCapabilities,
   resolveVerticalCapabilities,
 } from "./vertical-capabilities"
 
-export type { CreditPolicyHint } from "./vertical-capabilities"
+export type { BranchCapabilityResolutionInput, CreditPolicyHint } from "./vertical-capabilities"
+
+export {
+  CAPABILITY_PACKS,
+  assertCapabilityPackRegistryComplete,
+  getCapabilityPackById,
+  getFlagsForPilotSlug,
+  listCapabilityPacks,
+  unionFlagsForPackIds,
+} from "./capability-packs"
+
+export type {
+  CapabilityPack,
+  CapabilityPackId,
+  PackGstProfileHint,
+  PackInventoryMode,
+  PackPosMode,
+} from "./capability-packs"
+
+export {
+  buildProductFieldHintsFromCaps,
+  getProductFieldVisibility,
+  ProductFormFields,
+  validateProductFieldsAgainstTenantCaps,
+} from "./product-field-presets"
+
+export type { ProductFieldHintRow, ProductFieldSection, ProductFormFieldKey } from "./product-field-presets"
+
+export {
+  getProductBehaviorProfileDef,
+  isProductBehaviorProfileId,
+  PRODUCT_BEHAVIOR_PROFILE_IDS,
+  PRODUCT_BEHAVIOR_PROFILES,
+} from "./product-behavior-registry"
+
+export type { ProductBehaviorProfileDef, ProductBehaviorProfileId } from "./product-behavior-registry"
+
+export { getDashboardWidgetsForCapabilities, listAllDashboardWidgetSpecs } from "./dashboard-widgets"
+
+export type { DashboardWidgetSpec } from "./dashboard-widgets"
+
+export {
+  resolveBranchRules,
+  resolveBusinessRules,
+  resolveProductBehavior,
+} from "./business-rules"
+
+export type {
+  BranchProfileInput,
+  BusinessRulesContext,
+  BusinessTransactionKind,
+  ProductBehaviorView,
+  ProductLikeForRules,
+  ResolveBusinessRulesInput,
+  ResolvedBehaviorHints,
+  ResolvedBusinessRules,
+} from "./business-rules"
 
 export const BUSINESS_TYPES = ["retail", "supermart"] as const satisfies readonly BusinessTypeId[]
 

@@ -14,6 +14,9 @@ const toPublic = (b: BranchDoc) => ({
   notes: b.notes ?? "",
   status: b.status as "active" | "inactive",
   sortOrder: b.sortOrder ?? 0,
+  businessTypeSlug: String((b as { businessTypeSlug?: string }).businessTypeSlug ?? "").trim() || null,
+  enabledPackIds: [...(((b as { enabledPackIds?: string[] }).enabledPackIds ?? []) as string[])].filter(Boolean),
+  posMode: ((b as { posMode?: string }).posMode as "standard" | "high_volume" | "table_service" | "field" | undefined) ?? "standard",
   createdAt: b.createdAt?.toISOString?.() ?? "",
   updatedAt: b.updatedAt?.toISOString?.() ?? "",
 })
@@ -117,6 +120,9 @@ export const branchService = {
       notes: string
       status: "active" | "inactive"
       sortOrder: number
+      businessTypeSlug: string | null
+      enabledPackIds: string[]
+      posMode: "standard" | "high_volume" | "table_service" | "field"
     }>,
   ) {
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -139,6 +145,16 @@ export const branchService = {
     if (input.notes !== undefined) b.notes = input.notes.trim()
     if (input.status !== undefined) b.status = input.status
     if (input.sortOrder !== undefined) b.sortOrder = input.sortOrder
+    if (input.businessTypeSlug !== undefined) {
+      const raw = input.businessTypeSlug === null ? "" : String(input.businessTypeSlug).trim()
+      ;(b as { businessTypeSlug?: string }).businessTypeSlug = raw
+    }
+    if (input.enabledPackIds !== undefined) {
+      ;(b as { enabledPackIds?: string[] }).enabledPackIds = [...input.enabledPackIds].map((s) => String(s).trim()).filter(Boolean)
+    }
+    if (input.posMode !== undefined) {
+      ;(b as { posMode?: string }).posMode = input.posMode
+    }
     await b.save()
     await auditService.log({
       tenantId,

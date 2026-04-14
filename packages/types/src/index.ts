@@ -55,17 +55,37 @@ export interface UserPublic {
   updatedAt: string
 }
 
+/** Pack-derived hints for shells (POS, dashboard). Source of truth for flags remains `capabilities`. */
+export interface TenantBehaviorHintsDTO {
+  defaultPosMode: string
+  defaultInventoryMode: string
+  gstProfileHint: string
+  posShellRoute?: string | null
+  dashboardAccent?: string | null
+}
+
 export interface TenantDTO {
   id: string
   name: string
   businessType: BusinessTypeId
   status: TenantStatus
-  /** Optional pilot vertical (e.g. pharmacy); does not replace businessType until onboarding supports it. */
+  /** Optional pilot vertical (e.g. pharmacy); set at onboarding or settings. */
   pilotVertical?: string | null
-  /** Derived from pilotVertical; empty when no pilot or unknown slug. */
+  /** Tenant-level extra pack ids (roadmap slugs), unioned with pilot capabilities. */
+  enabledPackIds?: string[]
+  /** Derived from pilot + tenant/branch packs; empty when no pilot and no packs. */
   capabilities: string[]
+  /** Resolved UI/service hints — prefer over raw businessType for industry shells. */
+  behaviorHints?: TenantBehaviorHintsDTO
   createdAt: string
   updatedAt: string
+}
+
+/** Capability-driven product form hints (matches engine `ProductFieldHintRow`). */
+export interface ProductFieldHintDTO {
+  key: string
+  visible: boolean
+  section: string
 }
 
 export interface MeResponse {
@@ -74,6 +94,16 @@ export interface MeResponse {
   permissions: string[]
   menu: NavItemDTO[]
   features: Record<string, boolean>
+  /** Declarative product field visibility from resolved capabilities (tenant scope). */
+  productFieldHints?: ProductFieldHintDTO[]
+  /** Present when GET /me was called with `branchCode` and the branch exists. */
+  branchCapabilities?: string[]
+  /** Echo of the branch code used for `branchCapabilities`, if any. */
+  contextBranchCode?: string | null
+  /** Pack hints when `branchCode` was supplied and branch exists (branch-scoped resolution). */
+  branchBehaviorHints?: TenantBehaviorHintsDTO
+  /** Branch-scoped field hints when `branchCode` was supplied and branch exists. */
+  branchProductFieldHints?: ProductFieldHintDTO[]
 }
 
 export interface NavItemDTO {

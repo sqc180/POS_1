@@ -12,6 +12,7 @@ import {
   CardTitle,
   Skeleton,
 } from "@repo/ui"
+import { getDashboardWidgetsForCapabilities } from "@repo/business-type-engine"
 import type { DashboardSummaryDTO } from "@repo/types"
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -65,6 +66,11 @@ export default function DashboardPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  const packWidgets = useMemo(
+    () => getDashboardWidgetsForCapabilities(me?.tenant.capabilities ?? []),
+    [me?.tenant.capabilities],
+  )
 
   const kpis: Kpi[] = useMemo(() => {
     if (!summary) return []
@@ -174,6 +180,33 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {packWidgets.length > 0 ? (
+        <div className="space-y-4">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Vertical focus</h2>
+          <p className="text-sm text-muted-foreground">
+            Shortcuts based on your tenant&apos;s pilot capability packs — same design system, context-aware destinations.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {packWidgets.map((w) => (
+              <Card
+                key={w.id}
+                className="border-border/80 shadow-elevate-sm transition-shadow duration-200 hover:shadow-elevate"
+              >
+                <CardHeader className="pb-1 pt-4">
+                  <CardTitle className="text-sm font-medium text-foreground">{w.title}</CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-3 pb-4">
+                  <p className="text-xs text-muted-foreground">{w.description}</p>
+                  <Button variant="secondary" size="sm" className="w-full sm:w-auto" asChild>
+                    <Link href={w.href}>Open</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

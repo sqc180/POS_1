@@ -37,6 +37,11 @@ const productSchema = new Schema(
     /** Sale unit for weight / break-bulk (grocery pilots); optional. */
     saleUom: { type: String, trim: true },
     isLoose: { type: Boolean, default: false },
+    /** Optional registry key merged before `behaviorProfile.augmentFlags` (see engine `PRODUCT_BEHAVIOR_PROFILES`). */
+    behaviorProfileId: { type: String, trim: true },
+    behaviorProfile: {
+      augmentFlags: { type: [String], default: [] },
+    },
   },
   { timestamps: true },
 )

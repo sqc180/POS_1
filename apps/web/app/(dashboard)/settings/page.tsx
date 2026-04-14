@@ -276,6 +276,17 @@ export default function SettingsPage() {
               ) : (
                 <p className="text-xs text-muted-foreground">No extra capabilities until a pilot vertical is selected.</p>
               )}
+              {me?.tenant.behaviorHints?.posShellRoute ? (
+                <div className="flex flex-col gap-2 rounded-md border border-dashed border-border/80 bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    Resolved industry shell (from capability packs). POS mode:{" "}
+                    <span className="font-mono text-foreground">{me.tenant.behaviorHints.defaultPosMode}</span>
+                  </p>
+                  <Button type="button" variant="secondary" size="sm" className="w-full shrink-0 sm:w-auto" asChild>
+                    <Link href={me.tenant.behaviorHints.posShellRoute}>Open industry POS</Link>
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </CardContent>

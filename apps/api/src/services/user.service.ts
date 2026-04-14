@@ -5,7 +5,6 @@ import {
   getFeatureMap,
   getMenuForRole,
   resolveActiveBusinessType,
-  resolveVerticalCapabilities,
 } from "@repo/business-type-engine"
 import { canCreateUserOrSetPassword, permissionsForRole } from "@repo/permissions"
 import type { BusinessTypeId, UserPublic, UserRole, UserStatus } from "@repo/types"
@@ -14,6 +13,8 @@ import { TenantModel } from "../models/tenant.model.js"
 import { UserBranchAccessModel } from "../models/user-branch-access.model.js"
 import { UserModel, type UserDoc } from "../models/user.model.js"
 import { isMongoDuplicateKeyError } from "../lib/mongo-errors.js"
+import { buildProductFieldHintsFromCaps } from "@repo/business-type-engine"
+import { resolveRulesForTenantAndBranchDoc, resolveRulesForTenantDoc } from "../lib/ruleResolver.js"
 import { auditService } from "./audit.service.js"
 import { authService } from "./auth.service.js"
 
@@ -328,7 +329,7 @@ export const userService = {
 }
 
 export const meService = {
-  async getMe(tenantId: string, userId: string) {
+  async getMe(tenantId: string, userId: string, opts?: { branchCode?: string | null }) {
     const user = await UserModel.findOne({
       _id: new mongoose.Types.ObjectId(userId),
       tenantId: new mongoose.Types.ObjectId(tenantId),
@@ -344,7 +345,60 @@ export const meService = {
     const features = getFeatureMap(businessType)
     const [userRow] = await attachBranchCodes(tenantId, [toPublic(user)])
     const pilotRaw = (tenant as { pilotVertical?: string | null }).pilotVertical ?? null
-    const capabilities = [...resolveVerticalCapabilities(pilotRaw)]
+    const tenantPackIds = ((tenant as { enabledPackIds?: string[] }).enabledPackIds ?? []).filter(Boolean)
+    const tenantLean = {
+      businessType: tenant.businessType,
+      pilotVertical: pilotRaw,
+      enabledPackIds: tenantPackIds,
+    }
+    const tenantRules = resolveRulesForTenantDoc(tenantLean)
+    const capabilities = [...tenantRules.capabilities]
+    const behaviorHints = {
+      defaultPosMode: tenantRules.hints.defaultPosMode,
+      defaultInventoryMode: tenantRules.hints.defaultInventoryMode,
+      gstProfileHint: tenantRules.hints.gstProfileHint,
+      posShellRoute: tenantRules.hints.posShellRoute ?? null,
+      dashboardAccent: tenantRules.hints.dashboardAccent ?? null,
+    }
+    const code = opts?.branchCode?.trim()
+    let branchCapabilities: string[] | undefined
+    let contextBranchCode: string | null | undefined
+    let branchBehaviorHints: typeof behaviorHints | undefined
+    let branchProductFieldHints: { key: string; visible: boolean; section: string }[] | undefined
+    if (code) {
+      const br = await BranchModel.findOne({
+        tenantId: new mongoose.Types.ObjectId(tenantId),
+        code,
+      }).lean()
+      if (br) {
+        const slug = String((br as { businessTypeSlug?: string }).businessTypeSlug ?? "").trim() || null
+        const packIds = ((br as { enabledPackIds?: string[] }).enabledPackIds ?? []).filter(Boolean)
+        const branchRules = resolveRulesForTenantAndBranchDoc(tenantLean, {
+          businessTypeSlug: slug || undefined,
+          enabledPackIds: packIds.length ? packIds : undefined,
+          posMode: (br as { posMode?: string }).posMode,
+        })
+        branchCapabilities = [...branchRules.capabilities]
+        branchBehaviorHints = {
+          defaultPosMode: branchRules.hints.defaultPosMode,
+          defaultInventoryMode: branchRules.hints.defaultInventoryMode,
+          gstProfileHint: branchRules.hints.gstProfileHint,
+          posShellRoute: branchRules.hints.posShellRoute ?? null,
+          dashboardAccent: branchRules.hints.dashboardAccent ?? null,
+        }
+        contextBranchCode = code
+        branchProductFieldHints = buildProductFieldHintsFromCaps(branchRules.capabilities).map((h) => ({
+          key: h.key,
+          visible: h.visible,
+          section: h.section,
+        }))
+      }
+    }
+    const productFieldHints = buildProductFieldHintsFromCaps(tenantRules.capabilities).map((h) => ({
+      key: h.key,
+      visible: h.visible,
+      section: h.section,
+    }))
     return {
       user: userRow!,
       tenant: {
@@ -352,7 +406,9 @@ export const meService = {
         name: tenant.name,
         businessType: tenant.businessType,
         pilotVertical: pilotRaw,
+        enabledPackIds: tenantPackIds,
         capabilities,
+        behaviorHints,
         status: tenant.status,
         createdAt: tenant.createdAt?.toISOString?.() ?? "",
         updatedAt: tenant.updatedAt?.toISOString?.() ?? "",
@@ -360,6 +416,11 @@ export const meService = {
       permissions,
       menu,
       features: Object.fromEntries(Object.entries(features).map(([k, v]) => [k, v])) as Record<string, boolean>,
+      productFieldHints,
+      ...(branchCapabilities !== undefined ? { branchCapabilities } : {}),
+      ...(contextBranchCode !== undefined ? { contextBranchCode } : {}),
+      ...(branchBehaviorHints !== undefined ? { branchBehaviorHints } : {}),
+      ...(branchProductFieldHints !== undefined ? { branchProductFieldHints } : {}),
     }
   },
 }

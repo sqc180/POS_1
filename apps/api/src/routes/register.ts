@@ -5,11 +5,17 @@ import mongoose from "mongoose"
 import { z } from "zod"
 import type { ApiEnv } from "@repo/config"
 import { Permission, hasPermission } from "@repo/permissions"
-import { isPilotVerticalSlug } from "@repo/business-type-engine"
+import {
+  buildProductFieldHintsFromCaps,
+  isPilotVerticalSlug,
+  isProductBehaviorProfileId,
+  validateProductFieldsAgainstTenantCaps,
+} from "@repo/business-type-engine"
 import type { FileAssetDocumentType, UserRole, UserStatus } from "@repo/types"
 import { createRequireAuth } from "../hooks/require-auth.js"
 import { requirePermission } from "../hooks/require-perm.js"
 import { isMongoDuplicateKeyError } from "../lib/mongo-errors.js"
+import { loadResolvedTenantRules } from "../lib/ruleResolver.js"
 import { sendError } from "../lib/reply.js"
 import { authService, normalizeEmail } from "../services/auth.service.js"
 import { businessSettingsService } from "../services/business-settings.service.js"
@@ -33,6 +39,7 @@ import { createStorageFromEnv } from "../storage/factory.js"
 import { createStoredDocumentService } from "../services/stored-document.service.js"
 import { gatewayService } from "../services/gateway.service.js"
 import { gstSummaryService } from "../services/gst-summary.service.js"
+import { billingOrchestratorService } from "../modules/rules/billing-orchestrator.js"
 import { invoiceService } from "../services/invoice.service.js"
 import { jobService } from "../services/job.service.js"
 import { paymentService } from "../services/payment.service.js"
@@ -48,6 +55,19 @@ import { dashboardSummaryService } from "../services/dashboard-summary.service.j
 const onboardingSchema = z.object({
   businessName: z.string().min(1),
   businessType: z.enum(["retail", "supermart"]),
+  /** Optional industry pack (roadmap slug); drives capabilities after signup. */
+  pilotVertical: z
+    .string()
+    .max(64)
+    .optional()
+    .nullable()
+    .transform((v) => (v === null || v === undefined ? undefined : String(v).trim() === "" ? undefined : String(v).trim()))
+    .refine((v) => v === undefined || isPilotVerticalSlug(v), { message: "Invalid industry vertical" }),
+  enabledPackIds: z
+    .array(z.string().max(64))
+    .max(20)
+    .optional()
+    .refine((a) => !a || a.every((id) => isPilotVerticalSlug(id)), { message: "Invalid pack id" }),
   ownerEmail: z.preprocess(
     (v) => (v == null ? "" : String(v)),
     z
@@ -165,11 +185,23 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
     { preHandler: [requireAuth] },
     async (request, reply) => {
       const auth = request.auth!
-      const me = await meService.getMe(auth.tenantId, auth.userId)
+      const q = request.query as { branchCode?: string }
+      const me = await meService.getMe(auth.tenantId, auth.userId, { branchCode: q.branchCode })
       if (!me) return sendError(reply, 404, "not_found", "User or tenant not found")
       return reply.send({ success: true, data: me })
     },
   )
+
+  app.get("/tenant/product-field-presets", { preHandler: [requireAuth] }, async (request, reply) => {
+    const auth = request.auth!
+    const rules = await loadResolvedTenantRules(auth.tenantId)
+    const hints = buildProductFieldHintsFromCaps(rules.capabilities).map((h) => ({
+      key: h.key,
+      visible: h.visible,
+      section: h.section,
+    }))
+    return reply.send({ success: true, data: { hints } })
+  })
 
   const tenantRoutes = async (app: FastifyInstance) => {
     app.addHook("preHandler", requireAuth)
@@ -439,6 +471,20 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       notes: z.string().optional(),
       status: z.enum(["active", "inactive"]).optional(),
       sortOrder: z.number().optional(),
+      businessTypeSlug: z
+        .union([z.string().max(64), z.literal("")])
+        .nullable()
+        .optional()
+        .transform((v) => (v === "" ? null : v))
+        .refine((v) => v === null || v === undefined || isPilotVerticalSlug(v), {
+          message: "Invalid branch business type slug",
+        }),
+      enabledPackIds: z
+        .array(z.string().max(64))
+        .max(20)
+        .optional()
+        .refine((a) => !a || a.every((id) => isPilotVerticalSlug(id)), { message: "Invalid pack id in enabledPackIds" }),
+      posMode: z.enum(["standard", "high_volume", "table_service", "field"]).optional(),
     })
 
     app.patch("/branches/:id", { preHandler: [requirePermission(Permission.branches)] }, async (request, reply) => {
@@ -631,12 +677,27 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       /** Grocery-style sale unit (e.g. kg, piece); optional, ignored unless tenant has weight_break_bulk capability in UI. */
       saleUom: z.string().optional(),
       isLoose: z.boolean().optional(),
+      /** Adds capability flags for this product (merged with tenant/branch effective caps). */
+      behaviorAugmentFlags: z.array(z.string().max(64)).max(32).optional(),
+      behaviorProfileId: z
+        .union([z.string().trim().max(64), z.null()])
+        .optional()
+        .refine((v) => v === undefined || v === null || isProductBehaviorProfileId(v), {
+          message: "Invalid behaviorProfileId",
+        }),
     })
 
     app.post("/products", { preHandler: [requirePermission(Permission.products)] }, async (request, reply) => {
       const auth = request.auth!
       const parsed = productSchema.safeParse(request.body)
       if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+      const tenantRules = await loadResolvedTenantRules(auth.tenantId)
+      const fieldErr = validateProductFieldsAgainstTenantCaps(tenantRules.capabilities, {
+        saleUom: parsed.data.saleUom,
+        isLoose: parsed.data.isLoose,
+        behaviorAugmentFlags: parsed.data.behaviorAugmentFlags,
+      })
+      if (fieldErr) return sendError(reply, 400, "validation_error", fieldErr)
       try {
         const data = await productService.create(auth.tenantId, auth.userId, parsed.data)
         return reply.status(201).send({ success: true, data })
@@ -658,6 +719,21 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
         })
         .safeParse(request.body)
       if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+      const tenantRules = await loadResolvedTenantRules(auth.tenantId)
+      const existing = await productService.getById(auth.tenantId, id)
+      if (!existing) return sendError(reply, 404, "not_found", "Product not found")
+      const nextAugment =
+        parsed.data.behaviorAugmentFlags !== undefined
+          ? parsed.data.behaviorAugmentFlags
+          : existing.behaviorProfile?.augmentFlags
+      const nextSaleUom = parsed.data.saleUom !== undefined ? parsed.data.saleUom : existing.saleUom
+      const nextIsLoose = parsed.data.isLoose !== undefined ? parsed.data.isLoose : existing.isLoose === true
+      const fieldErr = validateProductFieldsAgainstTenantCaps(tenantRules.capabilities, {
+        saleUom: nextSaleUom,
+        isLoose: nextIsLoose,
+        behaviorAugmentFlags: nextAugment,
+      })
+      if (fieldErr) return sendError(reply, 400, "validation_error", fieldErr)
       try {
         const data = await productService.update(auth.tenantId, auth.userId, id, parsed.data)
         return reply.send({ success: true, data })
@@ -1200,7 +1276,7 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       const auth = request.auth!
       const { id } = request.params as { id: string }
       try {
-        const data = await invoiceService.complete(auth.tenantId, auth.userId, id)
+        const data = await billingOrchestratorService.confirmInvoice(auth.tenantId, auth.userId, id)
         try {
           await storedDocumentService.invalidateInvoicePdfAssets(auth.tenantId, id)
         } catch {

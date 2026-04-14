@@ -1,50 +1,7 @@
 import type { FutureBusinessTypeSlug } from "./future-registry"
 import { FUTURE_BUSINESS_TYPE_ROADMAP } from "./future-registry"
-
-/**
- * Cross-vertical capability flags. Tenants with no pilot vertical get an empty set.
- * Vertical-specific UIs and validators gate on these strings — not on raw pilot slug alone.
- */
-export const VerticalCapability = {
-  batchExpiry: "batch_expiry",
-  rxScheduleH: "rx_schedule_h",
-  coldChainHints: "cold_chain_hints",
-  weightBreakBulk: "weight_break_bulk",
-  bulkPricingTiers: "bulk_pricing_tiers",
-  creditPolicyStrict: "credit_policy_strict",
-  kitchenCourseModifiers: "kitchen_course_modifiers",
-  vanRouteSecondaryBilling: "van_route_secondary_billing",
-  styleMatrix: "style_matrix",
-  imeiWarranty: "imei_warranty",
-  bomLight: "bom_light",
-  jobCardLabourParts: "job_card_labour_parts",
-  interStoreTransfer: "inter_store_transfer",
-  consolidatedReporting: "consolidated_reporting",
-} as const
-
-export type VerticalCapability = (typeof VerticalCapability)[keyof typeof VerticalCapability]
-
-const CAPS_BY_PILOT: Record<FutureBusinessTypeSlug, readonly VerticalCapability[]> = {
-  pharmacy: [VerticalCapability.batchExpiry, VerticalCapability.rxScheduleH],
-  medical_store: [
-    VerticalCapability.batchExpiry,
-    VerticalCapability.rxScheduleH,
-    VerticalCapability.coldChainHints,
-  ],
-  grocery: [VerticalCapability.weightBreakBulk],
-  wholesale: [VerticalCapability.bulkPricingTiers, VerticalCapability.creditPolicyStrict],
-  restaurant: [VerticalCapability.kitchenCourseModifiers],
-  distribution: [
-    VerticalCapability.vanRouteSecondaryBilling,
-    VerticalCapability.interStoreTransfer,
-    VerticalCapability.creditPolicyStrict,
-  ],
-  fashion: [VerticalCapability.styleMatrix],
-  electronics: [VerticalCapability.imeiWarranty],
-  hardware: [VerticalCapability.bomLight],
-  service_repair: [VerticalCapability.jobCardLabourParts],
-  multi_branch: [VerticalCapability.interStoreTransfer, VerticalCapability.consolidatedReporting],
-}
+import { assertCapabilityPackRegistryComplete, getFlagsForPilotSlug, unionFlagsForPackIds } from "./capability-packs"
+import { VerticalCapability } from "./vertical-capability-codes"
 
 /** Slugs allowed for `Tenant.pilotVertical` (matches roadmap entries). */
 export const PILOT_VERTICAL_SLUGS = FUTURE_BUSINESS_TYPE_ROADMAP.map((r) => r.id) as readonly FutureBusinessTypeSlug[]
@@ -57,7 +14,53 @@ export function isPilotVerticalSlug(raw: string | null | undefined): raw is Futu
 
 export function resolveVerticalCapabilities(pilotVertical: string | null | undefined): readonly VerticalCapability[] {
   if (!pilotVertical || !isPilotVerticalSlug(pilotVertical)) return []
-  return [...(CAPS_BY_PILOT[pilotVertical] ?? [])]
+  return getFlagsForPilotSlug(pilotVertical)
+}
+
+export interface BranchCapabilityResolutionInput {
+  tenantPilotVertical: string | null | undefined
+  /** Tenant-level extra pack ids (unioned with pilot flags before branch overrides). */
+  tenantEnabledPackIds?: readonly string[] | null | undefined
+  /** When set to a valid pilot slug, replaces tenant pilot for this branch. */
+  branchBusinessTypeSlug?: string | null | undefined
+  /** Additional pack ids whose flags are unioned onto the branch base. */
+  branchEnabledPackIds?: readonly string[] | null | undefined
+}
+
+/**
+ * Effective capabilities: tenant pilot + optional tenant pack ids, then optional branch slug override,
+ * then optional branch extra pack ids (all unions; invalid pack ids ignored).
+ */
+export function resolveEffectiveCapabilities(input: BranchCapabilityResolutionInput): readonly VerticalCapability[] {
+  const slug = input.branchBusinessTypeSlug
+  let base: VerticalCapability[] =
+    slug && isPilotVerticalSlug(slug) ? [...getFlagsForPilotSlug(slug)] : [...resolveVerticalCapabilities(input.tenantPilotVertical)]
+  const tenantPackIds = input.tenantEnabledPackIds?.filter((s) => typeof s === "string" && s.trim()) ?? []
+  const branchPackIds = input.branchEnabledPackIds?.filter((s) => typeof s === "string" && s.trim()) ?? []
+  const packIds = [...new Set([...tenantPackIds, ...branchPackIds])]
+  if (packIds.length === 0) return base
+  const extra = unionFlagsForPackIds(packIds)
+  return [...new Set<VerticalCapability>([...base, ...extra])]
+}
+
+const verticalCapabilityValues = new Set<string>(Object.values(VerticalCapability) as string[])
+
+/**
+ * Merges product-level augment flags onto tenant/branch effective capabilities.
+ * Unknown strings are ignored. Order: base first, then augments (additive only).
+ */
+export function mergeProductAugmentedCapabilities(
+  effectiveCaps: readonly string[] | null | undefined,
+  augmentFlags: readonly string[] | null | undefined,
+): VerticalCapability[] {
+  const out = new Set<string>()
+  for (const c of effectiveCaps ?? []) {
+    if (verticalCapabilityValues.has(c)) out.add(c)
+  }
+  for (const c of augmentFlags ?? []) {
+    if (typeof c === "string" && verticalCapabilityValues.has(c)) out.add(c)
+  }
+  return [...out] as VerticalCapability[]
 }
 
 export function hasVerticalCapability(
@@ -89,11 +92,10 @@ export function getCreditPolicyForCapabilities(capabilities: readonly string[] |
   return { atComplete: "none" }
 }
 
-/** Dev-only invariant: every roadmap row has a capability entry (may be empty). */
+/** Dev-only invariant: every roadmap row has a capability pack (may enable zero flags). */
 export function assertPilotCapabilityMapComplete(): void {
+  assertCapabilityPackRegistryComplete()
   for (const row of FUTURE_BUSINESS_TYPE_ROADMAP) {
-    if (!(row.id in CAPS_BY_PILOT)) {
-      throw new Error(`Missing capability map for pilot vertical: ${row.id}`)
-    }
+    getFlagsForPilotSlug(row.id)
   }
 }

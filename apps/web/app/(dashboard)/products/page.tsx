@@ -38,14 +38,15 @@ import {
   TableHeader,
   TableRow,
 } from "@repo/ui"
-import { hasVerticalCapability, VerticalCapability } from "@repo/business-type-engine"
 import Link from "next/link"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { useAuth } from "@/components/auth-provider"
 import { apiRequest } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/notify"
+import { DynamicProductPresetFields } from "@/components/shared/dynamic-form/DynamicProductPresetFields"
+import { getProductFieldHintsForMe } from "@/lib/product-field-hints"
 
 type ProductRow = {
   id: string
@@ -91,7 +92,11 @@ const schema = z.object({
 
 export default function ProductsPage() {
   const { me } = useAuth()
-  const groceryFields = hasVerticalCapability(me?.tenant.capabilities, VerticalCapability.weightBreakBulk)
+  const presetHints = useMemo(
+    () => getProductFieldHintsForMe(me?.tenant.capabilities, me?.productFieldHints),
+    [me?.tenant.capabilities, me?.productFieldHints],
+  )
+  const groceryFields = presetHints.some((h) => h.key === "saleUom" && h.visible)
   const [rows, setRows] = useState<ProductRow[]>([])
   const [total, setTotal] = useState(0)
   const [skip, setSkip] = useState(0)
@@ -354,42 +359,7 @@ export default function ProductsPage() {
                   </FormItem>
                 )}
               />
-              {groceryFields ? (
-                <>
-                  <FormField
-                    control={form.control}
-                    name="saleUom"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Sale UOM</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g. kg, piece" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="isLoose"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-start gap-3 rounded-md border p-3">
-                        <FormControl>
-                          <Checkbox
-                            checked={field.value}
-                            onCheckedChange={(v) => field.onChange(v === true)}
-                            aria-label="Loose / break-bulk item"
-                          />
-                        </FormControl>
-                        <div className="space-y-1 leading-none">
-                          <FormLabel>Loose / break-bulk</FormLabel>
-                          <p className="text-xs text-muted-foreground">For weighted or open-sale SKUs.</p>
-                        </div>
-                      </FormItem>
-                    )}
-                  />
-                </>
-              ) : null}
+              <DynamicProductPresetFields control={form.control} hints={presetHints} />
               <FormField
                 control={form.control}
                 name="barcode"
