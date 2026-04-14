@@ -2,7 +2,7 @@ import mongoose from "mongoose"
 import { resolveProductBehavior } from "@repo/business-type-engine"
 import {
   inventoryReceiveStrategyRequiresExpiryDate,
-  selectInventoryReceiveStrategy,
+  selectInventoryReceiveStrategyFromContext,
 } from "../modules/rules/inventory-receive-strategy.js"
 import { loadResolvedRulesWithOptionalBranch } from "../lib/ruleResolver.js"
 import { InventoryItemModel } from "../models/inventory-item.model.js"
@@ -52,7 +52,10 @@ export const stockBatchService = {
       },
       resolved.capabilities,
     ).mergedCapabilities
-    const receiveStrategy = selectInventoryReceiveStrategy(eff)
+    const receiveStrategy = selectInventoryReceiveStrategyFromContext({
+      resolvedTenantOrBranchRules: { capabilities: resolved.capabilities },
+      productBehavior: { mergedCapabilities: eff },
+    })
     if (inventoryReceiveStrategyRequiresExpiryDate(receiveStrategy)) {
       const exp = input.expiryDate?.trim()
       if (!exp) {

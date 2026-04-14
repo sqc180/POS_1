@@ -3,6 +3,7 @@ import { VerticalCapability } from "@repo/business-type-engine"
 import {
   inventoryReceiveStrategyRequiresExpiryDate,
   selectInventoryReceiveStrategy,
+  selectInventoryReceiveStrategyFromContext,
 } from "../../src/modules/rules/inventory-receive-strategy.js"
 
 describe("selectInventoryReceiveStrategy", () => {
@@ -21,5 +22,13 @@ describe("selectInventoryReceiveStrategy", () => {
   it("selects standard for empty caps", () => {
     const key = selectInventoryReceiveStrategy([])
     expect(key).toBe("standard_receive")
+  })
+
+  it("selectInventoryReceiveStrategyFromContext matches merged product caps", () => {
+    const key = selectInventoryReceiveStrategyFromContext({
+      resolvedTenantOrBranchRules: { capabilities: [] },
+      productBehavior: { mergedCapabilities: [VerticalCapability.batchExpiry] },
+    })
+    expect(key).toBe("require_expiry_on_receive")
   })
 })
