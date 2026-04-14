@@ -5,6 +5,7 @@ import {
   getFeatureMap,
   getMenuForRole,
   resolveActiveBusinessType,
+  resolveVerticalCapabilities,
 } from "@repo/business-type-engine"
 import { canCreateUserOrSetPassword, permissionsForRole } from "@repo/permissions"
 import type { BusinessTypeId, UserPublic, UserRole, UserStatus } from "@repo/types"
@@ -129,11 +130,21 @@ export const userService = {
     }
     const passwordPlain = String(input.password ?? "").trim()
     const passwordHash = await authService.hashPassword(passwordPlain, env)
+    const emailNorm = input.email.toLowerCase().trim()
+    const dupRow = await UserModel.exists({
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+      email: emailNorm,
+    })
+    if (dupRow) {
+      const err = new Error("A user with this email already exists in your workspace")
+      ;(err as Error & { statusCode?: number }).statusCode = 409
+      throw err
+    }
     let user
     try {
       user = await UserModel.create({
         tenantId: new mongoose.Types.ObjectId(tenantId),
-        email: input.email.toLowerCase().trim(),
+        email: emailNorm,
         phone: input.phone?.trim(),
         passwordHash,
         name: input.name,
@@ -332,12 +343,16 @@ export const meService = {
     const menu = getMenuForRole(businessType, role)
     const features = getFeatureMap(businessType)
     const [userRow] = await attachBranchCodes(tenantId, [toPublic(user)])
+    const pilotRaw = (tenant as { pilotVertical?: string | null }).pilotVertical ?? null
+    const capabilities = [...resolveVerticalCapabilities(pilotRaw)]
     return {
       user: userRow!,
       tenant: {
         id: tenant._id.toString(),
         name: tenant.name,
         businessType: tenant.businessType,
+        pilotVertical: pilotRaw,
+        capabilities,
         status: tenant.status,
         createdAt: tenant.createdAt?.toISOString?.() ?? "",
         updatedAt: tenant.updatedAt?.toISOString?.() ?? "",

@@ -60,6 +60,10 @@ export interface TenantDTO {
   name: string
   businessType: BusinessTypeId
   status: TenantStatus
+  /** Optional pilot vertical (e.g. pharmacy); does not replace businessType until onboarding supports it. */
+  pilotVertical?: string | null
+  /** Derived from pilotVertical; empty when no pilot or unknown slug. */
+  capabilities: string[]
   createdAt: string
   updatedAt: string
 }

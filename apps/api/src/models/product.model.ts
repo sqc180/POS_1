@@ -34,6 +34,9 @@ const productSchema = new Schema(
     batchTracking: { type: Boolean, default: false },
     /** When true, completing an invoice requires serialNumbers per line qty. */
     serialTracking: { type: Boolean, default: false },
+    /** Sale unit for weight / break-bulk (grocery pilots); optional. */
+    saleUom: { type: String, trim: true },
+    isLoose: { type: Boolean, default: false },
   },
   { timestamps: true },
 )

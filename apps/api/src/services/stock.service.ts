@@ -5,6 +5,7 @@ import { InventoryItemModel } from "../models/inventory-item.model.js"
 import { ProductModel } from "../models/product.model.js"
 import { StockMovementModel } from "../models/stock-movement.model.js"
 import { auditService } from "./audit.service.js"
+import { inventoryService } from "./inventory.service.js"
 
 const productLabel = async (tenantId: string, productId: string): Promise<string> => {
   const p = await ProductModel.findOne({
@@ -194,6 +195,101 @@ export const stockService = {
       variantId: variantOid ? variantOid.toString() : undefined,
       batchId: opts?.primaryBatchId,
     })
+  },
+
+  /**
+   * Moves quantity from one branch row to another (same product+variant). Not transactional on standalone MongoDB;
+   * uses paired transfer_out / transfer_in movements with a shared reference id for reconciliation.
+   */
+  async applyInterBranchTransfer(
+    tenantId: string,
+    actorId: string,
+    input: { fromInventoryItemId: string; toBranchId: string; quantity: number; reason?: string },
+  ): Promise<{
+    referenceId: string
+    fromInventoryItemId: string
+    toInventoryItemId: string
+    quantity: number
+  }> {
+    if (!mongoose.Types.ObjectId.isValid(input.fromInventoryItemId)) {
+      const err = new Error("Invalid source inventory item")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const q = Math.abs(input.quantity)
+    if (q <= 0) {
+      const err = new Error("Quantity must be positive")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const source = await InventoryItemModel.findOne({
+      _id: new mongoose.Types.ObjectId(input.fromInventoryItemId),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+    })
+    if (!source) {
+      const err = new Error("Source inventory item not found")
+      ;(err as Error & { statusCode?: number }).statusCode = 404
+      throw err
+    }
+    const toBranch = String(input.toBranchId ?? "").trim()
+    if (!toBranch) {
+      const err = new Error("Destination branch is required")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    if (source.branchId === toBranch) {
+      const err = new Error("Source and destination branch must differ")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const variantIdStr = source.variantId?.toString()
+    const destDoc = await inventoryService.ensureRowForBranch(
+      tenantId,
+      actorId,
+      source.productId.toString(),
+      toBranch,
+      variantIdStr,
+    )
+    const referenceId = new mongoose.Types.ObjectId().toString()
+    const reason = input.reason?.trim() || "Inter-branch transfer"
+    await stockService.applyMovement(tenantId, actorId, {
+      inventoryItemId: source._id.toString(),
+      type: "transfer_out",
+      quantity: q,
+      reason,
+      referenceType: "inter_branch_transfer",
+      referenceId,
+      variantId: variantIdStr,
+    })
+    await stockService.applyMovement(tenantId, actorId, {
+      inventoryItemId: destDoc._id.toString(),
+      type: "transfer_in",
+      quantity: q,
+      reason,
+      referenceType: "inter_branch_transfer",
+      referenceId,
+      variantId: variantIdStr,
+    })
+    await auditService.log({
+      tenantId,
+      actorId,
+      action: "stock.inter_branch_transfer",
+      entity: "StockMovement",
+      entityId: referenceId,
+      metadata: {
+        fromInventoryItemId: source._id.toString(),
+        toInventoryItemId: destDoc._id.toString(),
+        quantity: q,
+        fromBranch: source.branchId,
+        toBranch,
+      },
+    })
+    return {
+      referenceId,
+      fromInventoryItemId: source._id.toString(),
+      toInventoryItemId: destDoc._id.toString(),
+      quantity: q,
+    }
   },
 
   async history(tenantId: string, inventoryItemId?: string, limit = 100) {

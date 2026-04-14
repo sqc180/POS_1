@@ -30,6 +30,8 @@ const toPublic = (p: ProductDoc) => ({
   variantMode: (p.variantMode as VariantMode | undefined) ?? "none",
   batchTracking: p.batchTracking === true,
   serialTracking: p.serialTracking === true,
+  saleUom: (p as { saleUom?: string }).saleUom?.trim() ? String((p as { saleUom?: string }).saleUom).trim() : "",
+  isLoose: (p as { isLoose?: boolean }).isLoose === true,
   createdAt: p.createdAt?.toISOString?.() ?? "",
   updatedAt: p.updatedAt?.toISOString?.() ?? "",
 })
@@ -128,6 +130,8 @@ export const productService = {
       internalCode?: string
       hsnSac?: string
       catalogLifecycle?: "active" | "discontinued" | "archived"
+      saleUom?: string
+      isLoose?: boolean
     },
   ) {
     const variantMode = input.variantMode ?? "none"
@@ -162,6 +166,8 @@ export const productService = {
       variantMode,
       batchTracking: input.batchTracking ?? false,
       serialTracking: input.serialTracking ?? false,
+      saleUom: input.saleUom?.trim(),
+      isLoose: input.isLoose ?? false,
     })
     const shouldCreateBaseInventory =
       p.trackStock && (variantMode === "none" || variantMode === "optional")
@@ -213,6 +219,8 @@ export const productService = {
       internalCode: string
       hsnSac: string
       catalogLifecycle: "active" | "discontinued" | "archived"
+      saleUom: string
+      isLoose: boolean
     }>,
   ) {
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -258,6 +266,12 @@ export const productService = {
     if (input.status !== undefined) p.status = input.status as "active" | "inactive"
     if (input.catalogLifecycle !== undefined) {
       p.catalogLifecycle = input.catalogLifecycle
+    }
+    if (input.saleUom !== undefined) {
+      ;(p as { saleUom?: string }).saleUom = input.saleUom.trim() === "" ? undefined : input.saleUom.trim()
+    }
+    if (input.isLoose !== undefined) {
+      ;(p as { isLoose?: boolean }).isLoose = input.isLoose
     }
     if (input.variantMode !== undefined) {
       if (input.variantMode === "required") {

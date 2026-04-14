@@ -26,14 +26,17 @@ import {
   TabsList,
   TabsTrigger,
 } from "@repo/ui"
+import { hasVerticalCapability, VerticalCapability } from "@repo/business-type-engine"
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useAuth } from "@/components/auth-provider"
 import { apiRequest } from "@/lib/api"
 import { branchLabelMap, formatBranchLabel } from "@/lib/branch-label"
 import { notifyError } from "@/lib/notify"
 
 type Row = {
   id: string
+  productId: string
   productName: string
   sku: string
   currentStock: number
@@ -60,6 +63,8 @@ type NearExpiryBatch = {
 type LocationRow = { id: string; branchId: string; code: string; name: string; kind: string; status: string }
 
 export default function InventoryPage() {
+  const { me } = useAuth()
+  const showTransferHint = hasVerticalCapability(me?.tenant.capabilities, VerticalCapability.interStoreTransfer)
   const [rows, setRows] = useState<Row[]>([])
   const [branchFilter, setBranchFilter] = useState<string>("all")
   const [branchLabels, setBranchLabels] = useState<Map<string, string>>(new Map())
@@ -205,6 +210,15 @@ export default function InventoryPage() {
             </Link>
             . Movement types now include purchase, sale, transfer, damage, and other ledger-aligned labels on the API.
           </p>
+          {showTransferHint ? (
+            <p className="mt-4 text-sm text-muted-foreground">
+              For cross-branch moves, use{" "}
+              <Link href="/stock#inter-branch-transfer" className="font-medium text-foreground underline-offset-4 hover:underline">
+                Inter-branch transfer
+              </Link>{" "}
+              on the Stock page (enabled for your pilot capabilities).
+            </p>
+          ) : null}
         </TabsContent>
         <TabsContent value="locations" className="rounded-xl border bg-card">
           {locations.length === 0 ? (

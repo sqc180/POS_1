@@ -2,8 +2,9 @@
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    // Bundler: workspace packages (e.g. @repo/business-type-engine) ship TS source; matches Next transpilation without .js rewrites.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,

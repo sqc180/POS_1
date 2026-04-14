@@ -8,6 +8,18 @@ export {
   resolveActiveBusinessType,
 } from "./future-registry"
 
+export {
+  VerticalCapability,
+  assertPilotCapabilityMapComplete,
+  getCreditPolicyForCapabilities,
+  hasVerticalCapability,
+  isPilotVerticalSlug,
+  PILOT_VERTICAL_SLUGS,
+  resolveVerticalCapabilities,
+} from "./vertical-capabilities"
+
+export type { CreditPolicyHint } from "./vertical-capabilities"
+
 export const BUSINESS_TYPES = ["retail", "supermart"] as const satisfies readonly BusinessTypeId[]
 
 export type FeatureKey =

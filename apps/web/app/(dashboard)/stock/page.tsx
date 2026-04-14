@@ -31,10 +31,12 @@ import {
   TableHeader,
   TableRow,
 } from "@repo/ui"
+import { hasVerticalCapability, VerticalCapability } from "@repo/business-type-engine"
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
+import { useAuth } from "@/components/auth-provider"
 import { apiRequest } from "@/lib/api"
 import { branchLabelMap, formatBranchLabel } from "@/lib/branch-label"
 import { notifyError, notifySuccess } from "@/lib/notify"
@@ -43,6 +45,13 @@ const movementSchema = z.object({
   inventoryItemId: z.string().min(1, "Select an inventory item"),
   type: z.enum(["in", "out", "adjustment", "correction", "transfer"]),
   quantity: z.coerce.number(),
+  reason: z.string().optional(),
+})
+
+const interBranchSchema = z.object({
+  fromInventoryItemId: z.string().min(1),
+  toBranchId: z.string().min(1),
+  quantity: z.coerce.number().positive(),
   reason: z.string().optional(),
 })
 
@@ -69,10 +78,13 @@ const inventoryRowLabel = (r: InventoryOption, labels: ReadonlyMap<string, strin
   `${r.productName} · ${r.sku || "—"} · ${formatBranchLabel(r.branchId, labels)} · ${r.currentStock} on hand`
 
 export default function StockPage() {
+  const { me } = useAuth()
   const [history, setHistory] = useState<Hist[]>([])
   const [inventoryRows, setInventoryRows] = useState<InventoryOption[]>([])
+  const [branchRows, setBranchRows] = useState<BranchDto[]>([])
   const [branchLabels, setBranchLabels] = useState<Map<string, string>>(new Map())
   const [loadError, setLoadError] = useState<string | null>(null)
+  const showInterBranchTransfer = hasVerticalCapability(me?.tenant.capabilities, VerticalCapability.interStoreTransfer)
 
   const labelByInventoryId = useMemo(() => {
     const m = new Map<string, string>()
@@ -97,6 +109,7 @@ export default function StockPage() {
       notifyError(invRes.error.message)
     }
     if (brRes.success) {
+      setBranchRows(brRes.data)
       setBranchLabels(branchLabelMap(brRes.data))
     }
     if (histRes.success) {
@@ -121,6 +134,26 @@ export default function StockPage() {
     () => [...inventoryRows].sort((a, b) => a.productName.localeCompare(b.productName, undefined, { sensitivity: "base" })),
     [inventoryRows],
   )
+
+  const transferForm = useForm<z.infer<typeof interBranchSchema>>({
+    resolver: zodResolver(interBranchSchema),
+    defaultValues: { fromInventoryItemId: "", toBranchId: "", quantity: 1, reason: "" },
+  })
+
+  const handleInterBranch = transferForm.handleSubmit(async (values) => {
+    const res = await apiRequest<{ referenceId: string }>("/stock/inter-branch-transfer", {
+      method: "POST",
+      body: JSON.stringify(values),
+    })
+    if (!res.success) {
+      transferForm.setError("root", { message: res.error.message })
+      notifyError(res.error.message)
+      return
+    }
+    transferForm.reset({ fromInventoryItemId: "", toBranchId: "", quantity: 1, reason: "" })
+    notifySuccess("Inter-branch transfer recorded")
+    await loadAll()
+  })
 
   const handleMovement = form.handleSubmit(async (values) => {
     const res = await apiRequest<{ currentStock: number }>("/stock/movements", {
@@ -281,6 +314,110 @@ export default function StockPage() {
           </Form>
         </CardContent>
       </Card>
+
+      {showInterBranchTransfer ? (
+        <Card id="inter-branch-transfer">
+          <CardHeader>
+            <CardTitle className="text-base">Inter-branch transfer</CardTitle>
+            <CardDescription>
+              Moves quantity from one inventory row to another branch for the same product. Shown when your workspace pilot includes distribution or
+              multi-branch capabilities.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Form {...transferForm}>
+              <form onSubmit={handleInterBranch} className="grid gap-4 md:grid-cols-2">
+                {transferForm.formState.errors.root ? (
+                  <Alert variant="destructive" className="md:col-span-2">
+                    <AlertTitle>Error</AlertTitle>
+                    <AlertDescription>{transferForm.formState.errors.root.message}</AlertDescription>
+                  </Alert>
+                ) : null}
+                <FormField
+                  control={transferForm.control}
+                  name="fromInventoryItemId"
+                  render={({ field }) => (
+                    <FormItem className="md:col-span-2">
+                      <FormLabel>From inventory row</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || undefined}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Source row (loses stock)" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent className="max-h-[min(24rem,70vh)]">
+                          {sortedInventory.map((r) => (
+                            <SelectItem key={r.id} value={r.id}>
+                              {inventoryRowLabel(r, branchLabels)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={transferForm.control}
+                  name="toBranchId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>To branch</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || undefined}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Destination branch code" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {branchRows
+                            .filter((b) => b.status === "active")
+                            .map((b) => (
+                              <SelectItem key={b.code} value={b.code}>
+                                {b.name} ({b.code})
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={transferForm.control}
+                  name="quantity"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Quantity</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.01" min="0" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={transferForm.control}
+                  name="reason"
+                  render={({ field }) => (
+                    <FormItem className="md:col-span-2">
+                      <FormLabel>Reason (optional)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Replenishment" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <Button type="submit" className="md:col-span-2" disabled={transferForm.formState.isSubmitting}>
+                  {transferForm.formState.isSubmitting ? "Transferring…" : "Run transfer"}
+                </Button>
+              </form>
+            </Form>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Recent movements</CardTitle>

@@ -1,10 +1,13 @@
 import mongoose from "mongoose"
+import { getCreditPolicyForCapabilities, resolveVerticalCapabilities } from "@repo/business-type-engine"
 import { canCreateUserOrSetPassword } from "@repo/permissions"
 import type { UserRole } from "@repo/types"
 import { BusinessSettingsModel } from "../models/business-settings.model.js"
 import { InvoiceModel, type InvoiceDoc } from "../models/invoice.model.js"
 import { ProductModel } from "../models/product.model.js"
+import { TenantModel } from "../models/tenant.model.js"
 import { auditService } from "./audit.service.js"
+import { customerService } from "./customer.service.js"
 import { numberingService } from "./numbering.service.js"
 import { productSerialService } from "./product-serial.service.js"
 import { stockBatchService } from "./stock-batch.service.js"
@@ -306,6 +309,31 @@ export const invoiceService = {
     inv.sgstTotal = sums.sgstTotal
     inv.igstTotal = sums.igstTotal
     inv.grandTotal = sums.grandTotal
+
+    const tenantRow = await TenantModel.findById(new mongoose.Types.ObjectId(tenantId))
+    const pilotRaw = (tenantRow as { pilotVertical?: string | null } | null)?.pilotVertical ?? null
+    const caps = resolveVerticalCapabilities(pilotRaw)
+    const creditHint = getCreditPolicyForCapabilities(caps)
+    if (creditHint.atComplete === "audit_over_limit" && inv.customerId) {
+      const snap = await customerService.getReceivableSnapshot(tenantId, inv.customerId.toString())
+      const limit = snap.creditLimit
+      if (limit > 0 && snap.outstanding + sums.grandTotal > limit) {
+        await auditService.log({
+          tenantId,
+          actorId,
+          action: "invoice.complete_credit_advisory",
+          entity: "Invoice",
+          entityId: inv._id.toString(),
+          metadata: {
+            customerId: inv.customerId.toString(),
+            creditLimit: limit,
+            outstandingBefore: snap.outstanding,
+            proposedTotal: sums.grandTotal,
+          },
+        })
+      }
+    }
+
     const { number } = await numberingService.nextInvoiceNumber(tenantId)
     inv.invoiceNumber = number
     inv.status = "completed"

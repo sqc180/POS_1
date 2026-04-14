@@ -3,6 +3,7 @@ import { BusinessSettingsModel } from "../models/business-settings.model.js"
 import { InventoryItemModel, type InventoryItemDoc } from "../models/inventory-item.model.js"
 import { ProductModel } from "../models/product.model.js"
 import { ProductVariantModel } from "../models/product-variant.model.js"
+import { auditService } from "./audit.service.js"
 
 const toPublic = async (i: InventoryItemDoc) => {
   const product = await ProductModel.findById(i.productId)
@@ -80,5 +81,64 @@ export const inventoryService = {
       allowNegativeStock: s?.allowNegativeStock ?? false,
       defaultBranchId: s?.defaultBranchId ?? "main",
     }
+  },
+
+  /**
+   * Ensures an inventory row exists for product+branch (+ optional variant). Creates a zero row when missing (trackStock products only).
+   */
+  async ensureRowForBranch(
+    tenantId: string,
+    actorId: string,
+    productId: string,
+    branchId: string,
+    variantId: string | null | undefined,
+  ): Promise<InventoryItemDoc> {
+    const tenantOid = new mongoose.Types.ObjectId(tenantId)
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      const err = new Error("Invalid product")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const productOid = new mongoose.Types.ObjectId(productId)
+    const filter: Record<string, unknown> = {
+      tenantId: tenantOid,
+      productId: productOid,
+      branchId,
+    }
+    if (variantId && mongoose.Types.ObjectId.isValid(variantId)) {
+      filter.variantId = new mongoose.Types.ObjectId(variantId)
+    } else {
+      filter.$or = [{ variantId: null }, { variantId: { $exists: false } }]
+    }
+    const existing = await InventoryItemModel.findOne(filter)
+    if (existing) return existing
+    const p = await ProductModel.findOne({ _id: productOid, tenantId: tenantOid })
+    if (!p?.trackStock) {
+      const err = new Error("Product does not track stock; cannot create inventory row for transfer")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const vOid =
+      variantId && mongoose.Types.ObjectId.isValid(variantId) ? new mongoose.Types.ObjectId(variantId) : undefined
+    const doc = await InventoryItemModel.create({
+      tenantId: tenantOid,
+      productId: productOid,
+      variantId: vOid ?? null,
+      branchId,
+      openingStock: 0,
+      currentStock: 0,
+      reservedStock: 0,
+      reorderLevel: 0,
+      lowStockThreshold: 0,
+    })
+    await auditService.log({
+      tenantId,
+      actorId,
+      action: "inventory.row_created",
+      entity: "InventoryItem",
+      entityId: doc._id.toString(),
+      metadata: { productId, branchId, variantId: variantId ?? null, reason: "inter_branch_transfer_target" },
+    })
+    return doc
   },
 }

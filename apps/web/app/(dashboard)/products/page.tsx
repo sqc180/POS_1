@@ -38,10 +38,12 @@ import {
   TableHeader,
   TableRow,
 } from "@repo/ui"
+import { hasVerticalCapability, VerticalCapability } from "@repo/business-type-engine"
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
+import { useAuth } from "@/components/auth-provider"
 import { apiRequest } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/notify"
 
@@ -58,6 +60,8 @@ type ProductRow = {
   variantMode?: "none" | "optional" | "required"
   batchTracking?: boolean
   serialTracking?: boolean
+  saleUom?: string
+  isLoose?: boolean
 }
 
 type CategoryRow = { id: string; name: string }
@@ -81,9 +85,13 @@ const schema = z.object({
   trackStock: z.boolean().optional(),
   brand: z.string().optional(),
   unit: z.string().optional(),
+  saleUom: z.string().optional(),
+  isLoose: z.boolean().optional(),
 })
 
 export default function ProductsPage() {
+  const { me } = useAuth()
+  const groceryFields = hasVerticalCapability(me?.tenant.capabilities, VerticalCapability.weightBreakBulk)
   const [rows, setRows] = useState<ProductRow[]>([])
   const [total, setTotal] = useState(0)
   const [skip, setSkip] = useState(0)
@@ -160,6 +168,8 @@ export default function ProductsPage() {
       trackStock: true,
       brand: "",
       unit: "",
+      saleUom: "",
+      isLoose: false,
     },
   })
 
@@ -176,6 +186,12 @@ export default function ProductsPage() {
       brand: values.brand || undefined,
       unit: values.unit || undefined,
       trackStock: values.trackStock,
+      ...(groceryFields
+        ? {
+            saleUom: values.saleUom?.trim() || undefined,
+            isLoose: values.isLoose,
+          }
+        : {}),
     }
     const res = await apiRequest<ProductRow>("/products", { method: "POST", body: JSON.stringify(body) })
     if (!res.success) {
@@ -338,6 +354,42 @@ export default function ProductsPage() {
                   </FormItem>
                 )}
               />
+              {groceryFields ? (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="saleUom"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Sale UOM</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. kg, piece" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="isLoose"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-start gap-3 rounded-md border p-3">
+                        <FormControl>
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={(v) => field.onChange(v === true)}
+                            aria-label="Loose / break-bulk item"
+                          />
+                        </FormControl>
+                        <div className="space-y-1 leading-none">
+                          <FormLabel>Loose / break-bulk</FormLabel>
+                          <p className="text-xs text-muted-foreground">For weighted or open-sale SKUs.</p>
+                        </div>
+                      </FormItem>
+                    )}
+                  />
+                </>
+              ) : null}
               <FormField
                 control={form.control}
                 name="barcode"
@@ -513,6 +565,13 @@ export default function ProductsPage() {
                   ) : p.batchTracking || p.serialTracking ? (
                     <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
                       {[p.batchTracking ? "Batch" : null, p.serialTracking ? "Serial" : null].filter(Boolean).join(" · ")}
+                    </span>
+                  ) : null}
+                  {p.saleUom || p.isLoose ? (
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {p.saleUom ? `UOM: ${p.saleUom}` : ""}
+                      {p.saleUom && p.isLoose ? " · " : ""}
+                      {p.isLoose ? "Loose" : ""}
                     </span>
                   ) : null}
                 </TableCell>

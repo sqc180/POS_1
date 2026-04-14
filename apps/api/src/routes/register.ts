@@ -5,6 +5,7 @@ import mongoose from "mongoose"
 import { z } from "zod"
 import type { ApiEnv } from "@repo/config"
 import { Permission, hasPermission } from "@repo/permissions"
+import { isPilotVerticalSlug } from "@repo/business-type-engine"
 import type { FileAssetDocumentType, UserRole, UserStatus } from "@repo/types"
 import { createRequireAuth } from "../hooks/require-auth.js"
 import { requirePermission } from "../hooks/require-perm.js"
@@ -24,6 +25,7 @@ import { productVariantService } from "../services/product-variant.service.js"
 import { productSerialService } from "../services/product-serial.service.js"
 import { stockBatchService } from "../services/stock-batch.service.js"
 import { stockService } from "../services/stock.service.js"
+import { tenantService } from "../services/tenant.service.js"
 import { supplierService } from "../services/supplier.service.js"
 import { permissionForDocumentType } from "../lib/document-permission.js"
 import { resolveStorageRoot } from "../lib/storage-root.js"
@@ -626,6 +628,9 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       batchTracking: z.boolean().optional(),
       serialTracking: z.boolean().optional(),
       catalogLifecycle: z.enum(["active", "discontinued", "archived"]).optional(),
+      /** Grocery-style sale unit (e.g. kg, piece); optional, ignored unless tenant has weight_break_bulk capability in UI. */
+      saleUom: z.string().optional(),
+      isLoose: z.boolean().optional(),
     })
 
     app.post("/products", { preHandler: [requirePermission(Permission.products)] }, async (request, reply) => {
@@ -785,6 +790,26 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
       try {
         const data = await stockService.applyMovement(auth.tenantId, auth.userId, parsed.data)
+        return reply.status(201).send({ success: true, data })
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "stock_error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
+    const interBranchTransferSchema = z.object({
+      fromInventoryItemId: z.string().min(1),
+      toBranchId: z.string().min(1),
+      quantity: z.coerce.number().positive(),
+      reason: z.string().optional(),
+    })
+
+    app.post("/stock/inter-branch-transfer", { preHandler: [requirePermission(Permission.stock)] }, async (request, reply) => {
+      const auth = request.auth!
+      const parsed = interBranchTransferSchema.safeParse(request.body)
+      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+      try {
+        const data = await stockService.applyInterBranchTransfer(auth.tenantId, auth.userId, parsed.data)
         return reply.status(201).send({ success: true, data })
       } catch (e: unknown) {
         const status = (e as Error & { statusCode?: number }).statusCode ?? 400
@@ -980,6 +1005,33 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
       try {
         const data = await businessSettingsService.update(auth.tenantId, auth.userId, parsed.data)
+        return reply.send({ success: true, data })
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
+    const pilotVerticalBodySchema = z
+      .object({
+        pilotVertical: z.union([z.string(), z.null()]).transform((v) => {
+          if (v === null) return null
+          const s = String(v).trim()
+          return s === "" ? null : s
+        }),
+      })
+      .superRefine((data, ctx) => {
+        if (data.pilotVertical !== null && !isPilotVerticalSlug(data.pilotVertical)) {
+          ctx.addIssue({ code: "custom", message: "Invalid pilot vertical", path: ["pilotVertical"] })
+        }
+      })
+
+    app.patch("/settings/pilot-vertical", { preHandler: [requirePermission(Permission.settings)] }, async (request, reply) => {
+      const auth = request.auth!
+      const parsed = pilotVerticalBodySchema.safeParse(request.body)
+      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+      try {
+        const data = await tenantService.updatePilotVertical(auth.tenantId, auth.userId, auth.role, parsed.data.pilotVertical)
         return reply.send({ success: true, data })
       } catch (e: unknown) {
         const status = (e as Error & { statusCode?: number }).statusCode ?? 400
