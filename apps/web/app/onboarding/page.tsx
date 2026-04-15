@@ -12,6 +12,7 @@ import {
   CardTitle,
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -28,14 +29,23 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
+import { FUTURE_BUSINESS_TYPE_ROADMAP, isPilotVerticalSlug } from "@repo/business-type-engine"
 import { useAuth } from "@/components/auth-provider"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { apiRequest } from "@/lib/api"
 import { notifyError } from "@/lib/notify"
 
+const parsePackIdsCsv = (raw: string | undefined): string[] =>
+  (raw ?? "")
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
 const schema = z.object({
   businessName: z.string().min(1),
   businessType: z.enum(["retail", "supermart"]),
+  industryVertical: z.string().max(64).optional(),
+  extraPackIdsCsv: z.string().optional(),
   ownerName: z.string().min(1),
   ownerEmail: z
     .string()
@@ -55,6 +65,8 @@ export default function OnboardingPage() {
     defaultValues: {
       businessName: "",
       businessType: "retail",
+      industryVertical: "__none__",
+      extraPackIdsCsv: "",
       ownerName: "",
       ownerEmail: "",
       ownerPassword: "",
@@ -67,12 +79,30 @@ export default function OnboardingPage() {
       .trim()
       .toLowerCase()
       .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    const pilotRaw = values.industryVertical === "__none__" ? undefined : values.industryVertical?.trim()
+    if (pilotRaw && !isPilotVerticalSlug(pilotRaw)) {
+      setError("Invalid industry vertical")
+      notifyError("Invalid industry vertical")
+      return
+    }
+    const extraIds = parsePackIdsCsv(values.extraPackIdsCsv)
+    for (const id of extraIds) {
+      if (!isPilotVerticalSlug(id)) {
+        setError(`Invalid pack id: ${id}`)
+        notifyError(`Invalid pack id: ${id}`)
+        return
+      }
+    }
     const res = await apiRequest<{ token: string; tenantId?: string; userId?: string }>("/auth/onboarding", {
       method: "POST",
       body: JSON.stringify({
-        ...values,
+        businessName: values.businessName,
+        businessType: values.businessType,
+        ownerName: values.ownerName,
         ownerEmail: email,
         ownerPassword: String(values.ownerPassword).trim(),
+        pilotVertical: pilotRaw ?? null,
+        enabledPackIds: extraIds.length > 0 ? extraIds : undefined,
       }),
       skipAuth: true,
     })
@@ -143,6 +173,59 @@ export default function OnboardingPage() {
                         <SelectItem value="supermart">Supermart</SelectItem>
                       </SelectContent>
                     </Select>
+                    <FormDescription>
+                      Core billing and feature map (retail vs supermart). Industry-specific POS and inventory rules use the industry vertical
+                      below.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="industryVertical"
+                render={({ field }) => (
+                  <FormItem className="sm:col-span-2">
+                    <FormLabel>Industry vertical (optional)</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value ?? "__none__"}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="None — configure later in Settings" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">None — I will set this later</SelectItem>
+                        {FUTURE_BUSINESS_TYPE_ROADMAP.map((row) => (
+                          <SelectItem key={row.id} value={row.id}>
+                            {row.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Sets your tenant&apos;s capability flags from day one (pharmacy, grocery, wholesale, etc.). You can change this anytime in
+                      Settings.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="extraPackIdsCsv"
+                render={({ field }) => (
+                  <FormItem className="sm:col-span-2">
+                    <FormLabel>Extra capability packs (optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="e.g. wholesale, multi_branch"
+                        className="font-mono text-sm"
+                        autoComplete="off"
+                        {...field}
+                        value={field.value ?? ""}
+                      />
+                    </FormControl>
+                    <FormDescription>Comma-separated pack ids to merge with your primary vertical — advanced mixed setups.</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

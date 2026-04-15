@@ -12,22 +12,56 @@ export type UserRole =
 
 export type TenantStatus = "active" | "suspended"
 
-export type UserStatus = "active" | "inactive"
+export type UserStatus =
+  | "active"
+  | "inactive"
+  | "invited"
+  | "suspended"
+  | "deactivated"
+  | "archived"
 
 export type TaxMode = "inclusive" | "exclusive"
 
-export type StockMovementType = "in" | "out" | "adjustment" | "correction" | "transfer"
+export type StockMovementType =
+  | "in"
+  | "out"
+  | "adjustment"
+  | "correction"
+  | "transfer"
+  | "opening"
+  | "purchase"
+  | "purchase_return"
+  | "sale"
+  | "sale_return"
+  | "transfer_out"
+  | "transfer_in"
+  | "production_consumption"
+  | "production_output"
+  | "damage"
+  | "expiry_write_off"
 
 export interface UserPublic {
   id: string
   email: string
   name: string
+  phone?: string
   role: UserRole
   status: UserStatus
   tenantId: string
+  /** Omitted or null = all branches; non-empty = restricted to these branch codes. */
+  branchCodes?: string[] | null
   lastLoginAt?: string
   createdAt: string
   updatedAt: string
+}
+
+/** Pack-derived hints for shells (POS, dashboard). Source of truth for flags remains `capabilities`. */
+export interface TenantBehaviorHintsDTO {
+  defaultPosMode: string
+  defaultInventoryMode: string
+  gstProfileHint: string
+  posShellRoute?: string | null
+  dashboardAccent?: string | null
 }
 
 export interface TenantDTO {
@@ -35,8 +69,23 @@ export interface TenantDTO {
   name: string
   businessType: BusinessTypeId
   status: TenantStatus
+  /** Optional pilot vertical (e.g. pharmacy); set at onboarding or settings. */
+  pilotVertical?: string | null
+  /** Tenant-level extra pack ids (roadmap slugs), unioned with pilot capabilities. */
+  enabledPackIds?: string[]
+  /** Derived from pilot + tenant/branch packs; empty when no pilot and no packs. */
+  capabilities: string[]
+  /** Resolved UI/service hints — prefer over raw businessType for industry shells. */
+  behaviorHints?: TenantBehaviorHintsDTO
   createdAt: string
   updatedAt: string
+}
+
+/** Capability-driven product form hints (matches engine `ProductFieldHintRow`). */
+export interface ProductFieldHintDTO {
+  key: string
+  visible: boolean
+  section: string
 }
 
 export interface MeResponse {
@@ -45,6 +94,16 @@ export interface MeResponse {
   permissions: string[]
   menu: NavItemDTO[]
   features: Record<string, boolean>
+  /** Declarative product field visibility from resolved capabilities (tenant scope). */
+  productFieldHints?: ProductFieldHintDTO[]
+  /** Present when GET /me was called with `branchCode` and the branch exists. */
+  branchCapabilities?: string[]
+  /** Echo of the branch code used for `branchCapabilities`, if any. */
+  contextBranchCode?: string | null
+  /** Pack hints when `branchCode` was supplied and branch exists (branch-scoped resolution). */
+  branchBehaviorHints?: TenantBehaviorHintsDTO
+  /** Branch-scoped field hints when `branchCode` was supplied and branch exists. */
+  branchProductFieldHints?: ProductFieldHintDTO[]
 }
 
 export interface NavItemDTO {

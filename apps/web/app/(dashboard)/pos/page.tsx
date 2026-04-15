@@ -16,6 +16,11 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
   Input,
   Label,
   Popover,
@@ -42,13 +47,33 @@ import { branchLabelMap, formatBranchLabel } from "@/lib/branch-label"
 import { notifyError } from "@/lib/notify"
 import { loadRazorpayScript, openRazorpayCheckout } from "@/lib/razorpay-checkout"
 
-type ProductRow = { id: string; name: string; sku: string; sellingPrice: number; status: string; barcode?: string }
+type ProductRow = {
+  id: string
+  name: string
+  sku: string
+  sellingPrice: number
+  status: string
+  barcode?: string
+  variantMode?: "none" | "optional" | "required"
+  batchTracking?: boolean
+  serialTracking?: boolean
+}
 type CustomerRow = { id: string; name: string; phone?: string }
-type CartLine = { productId: string; name: string; sku: string; qty: number }
+type CartLine = {
+  productId: string
+  variantId?: string
+  name: string
+  sku: string
+  qty: number
+  serialTracking?: boolean
+  serialInput?: string
+}
+
+type VariantRow = { id: string; label: string; sku: string }
 
 type PreviewLineStock =
   | { tracked: false }
-  | { tracked: true; branchId: string; available: number | null; sufficient: boolean }
+  | { tracked: true; branchId: string; available: number | null; sufficient: boolean; requiresVariant?: boolean }
 
 type PreviewRes = {
   grandTotal: number
@@ -58,6 +83,7 @@ type PreviewRes = {
   igstTotal: number
   lines: {
     productId: string
+    variantId: string | null
     name: string
     sku: string
     lineTotal: number
@@ -98,6 +124,8 @@ const stockBranchFromPreview = (lines: PreviewRes["lines"]): string => {
   return row?.stock.tracked ? row.stock.branchId : "main"
 }
 
+const cartLineKey = (l: CartLine): string => `${l.productId}:${l.variantId ?? ""}`
+
 const isTrackedInsufficientLine = (
   l: PreviewRes["lines"][number],
 ): l is PreviewRes["lines"][number] & { stock: Extract<PreviewLineStock, { tracked: true }> } =>
@@ -125,6 +153,9 @@ export default function PosPage() {
   const [razorpayBusy, setRazorpayBusy] = useState(false)
   const [verifyState, setVerifyState] = useState<"idle" | "pending" | "verified" | "error">("idle")
   const [payTab, setPayTab] = useState("cash")
+  const [variantPickerOpen, setVariantPickerOpen] = useState(false)
+  const [variantPickerProduct, setVariantPickerProduct] = useState<ProductRow | null>(null)
+  const [variantList, setVariantList] = useState<VariantRow[]>([])
 
   const setFeedback = (text: string, variant: "default" | "destructive" = "default") => {
     setMsg(text)
@@ -164,27 +195,61 @@ export default function PosPage() {
     })()
   }, [])
 
-  const handleAddProduct = (p: ProductRow) => {
+  const handleAddToCart = (p: ProductRow, variant?: VariantRow) => {
+    const line: CartLine = {
+      productId: p.id,
+      variantId: variant?.id,
+      name: variant ? `${p.name} (${variant.label})` : p.name,
+      sku: variant?.sku ?? p.sku,
+      qty: 1,
+      serialTracking: p.serialTracking === true,
+      serialInput: "",
+    }
     setCart((c) => {
-      const i = c.findIndex((x) => x.productId === p.id)
+      const k = cartLineKey(line)
+      const i = c.findIndex((x) => cartLineKey(x) === k)
       if (i >= 0) {
         const n = [...c]
         n[i] = { ...n[i], qty: n[i].qty + 1 }
         return n
       }
-      return [...c, { productId: p.id, name: p.name, sku: p.sku, qty: 1 }]
+      return [...c, line]
     })
     setPreview(null)
     setFeedback("")
   }
 
-  const handleQtyChange = (productId: string, raw: string) => {
+  const handleChooseProduct = async (p: ProductRow) => {
+    if (p.variantMode === "required") {
+      const res = await apiRequest<VariantRow[]>(`/products/${p.id}/variants`)
+      if (!res.success) {
+        setFeedback(res.error.message, "destructive")
+        return
+      }
+      if (res.data.length === 0) {
+        setFeedback("This product requires a variant, but none exist yet. Add variants on the product page.", "destructive")
+        return
+      }
+      setVariantPickerProduct(p)
+      setVariantList(res.data)
+      setVariantPickerOpen(true)
+      return
+    }
+    handleAddToCart(p)
+  }
+
+  const handleQtyChange = (key: string, raw: string) => {
     const qty = Number.parseInt(raw, 10)
     if (Number.isNaN(qty) || qty < 1) {
-      setCart((c) => c.filter((x) => x.productId !== productId))
+      setCart((c) => c.filter((x) => cartLineKey(x) !== key))
     } else {
-      setCart((c) => c.map((x) => (x.productId === productId ? { ...x, qty } : x)))
+      setCart((c) => c.map((x) => (cartLineKey(x) === key ? { ...x, qty } : x)))
     }
+    setPreview(null)
+  }
+
+  const handleSerialInputChange = (key: string, value: string) => {
+    setCart((c) => c.map((x) => (cartLineKey(x) === key ? { ...x, serialInput: value } : x)))
     setPreview(null)
   }
 
@@ -200,7 +265,7 @@ export default function PosPage() {
     }
     const active = r2.data.filter((p) => p.status === "active")
     if (active.length === 1) {
-      handleAddProduct(active[0]!)
+      void handleChooseProduct(active[0]!)
       setBarcode("")
       setFeedback(`Added ${active[0]!.name}`)
       return
@@ -210,9 +275,23 @@ export default function PosPage() {
     setFeedback(active.length === 0 ? "No product match for barcode / code" : "Pick a product from the list")
   }
 
+  const linesFromCart = () =>
+    cart.map((l) => ({
+      productId: l.productId,
+      qty: l.qty,
+      variantId: l.variantId,
+      serialNumbers:
+        l.serialTracking && l.serialInput?.trim()
+          ? l.serialInput
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined,
+    }))
+
   const handlePreview = async () => {
     if (cart.length === 0) return
-    const lines = cart.map((l) => ({ productId: l.productId, qty: l.qty }))
+    const lines = linesFromCart()
     const res = await apiRequest<PreviewRes>("/pos/preview", {
       method: "POST",
       body: JSON.stringify({ lines }),
@@ -237,6 +316,9 @@ export default function PosPage() {
     setBarcode("")
     setVerifyState("idle")
     setPayTab("cash")
+    setVariantPickerOpen(false)
+    setVariantPickerProduct(null)
+    setVariantList([])
     setFeedback("New sale")
   }
 
@@ -248,7 +330,7 @@ export default function PosPage() {
 
   const handleSaveDraft = async () => {
     if (cart.length === 0) return
-    const lines = cart.map((l) => ({ productId: l.productId, qty: l.qty }))
+    const lines = linesFromCart()
     const res = await apiRequest<InvoiceRow>("/invoices", {
       method: "POST",
       body: JSON.stringify({
@@ -268,7 +350,7 @@ export default function PosPage() {
 
   const handleUpdateDraft = async () => {
     if (!invoiceId || cart.length === 0) return
-    const lines = cart.map((l) => ({ productId: l.productId, qty: l.qty }))
+    const lines = linesFromCart()
     const res = await apiRequest<InvoiceRow>(`/invoices/${invoiceId}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -527,7 +609,7 @@ export default function PosPage() {
                           key={p.id}
                           value={`${p.id}-${p.name}-${p.sku}`}
                           onSelect={() => {
-                            handleAddProduct(p)
+                            void handleChooseProduct(p)
                             setProductOpen(false)
                           }}
                         >
@@ -613,12 +695,15 @@ export default function PosPage() {
               {invoice.invoiceNumber ? <span className="text-muted-foreground">#{invoice.invoiceNumber}</span> : null}
               <span className="text-muted-foreground">Due: ₹{remaining.toFixed(2)}</span>
               {verifyState === "pending" ? (
-                <Badge variant="outline" className="border-amber-500/60 text-amber-700 dark:text-amber-400">
+                <Badge
+                  variant="outline"
+                  className="border-warning/55 bg-warning/10 text-warning-foreground hover:bg-warning/15"
+                >
                   Verifying…
                 </Badge>
               ) : null}
               {verifyState === "verified" ? (
-                <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600">
+                <Badge variant="default" className="bg-success text-success-foreground hover:bg-success/90">
                   Razorpay verified
                 </Badge>
               ) : null}
@@ -645,10 +730,22 @@ export default function PosPage() {
                 </TableRow>
               ) : (
                 cart.map((l) => (
-                  <TableRow key={l.productId}>
+                  <TableRow key={cartLineKey(l)}>
                     <TableCell>
                       <div className="font-medium">{l.name}</div>
                       <div className="text-xs text-muted-foreground">{l.sku}</div>
+                      {l.serialTracking ? (
+                        <div className="mt-2 space-y-1">
+                          <Label className="text-xs">Serial numbers (comma-separated, count must match qty)</Label>
+                          <Input
+                            className="h-8 font-mono text-xs"
+                            value={l.serialInput ?? ""}
+                            onChange={(e) => handleSerialInputChange(cartLineKey(l), e.target.value)}
+                            placeholder="SN001, SN002"
+                            aria-label={`Serial numbers for ${l.name}`}
+                          />
+                        </div>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       <Input
@@ -656,7 +753,7 @@ export default function PosPage() {
                         type="number"
                         min={1}
                         value={l.qty}
-                        onChange={(e) => handleQtyChange(l.productId, e.target.value)}
+                        onChange={(e) => handleQtyChange(cartLineKey(l), e.target.value)}
                         aria-label={`Quantity for ${l.name}`}
                       />
                     </TableCell>
@@ -684,9 +781,10 @@ export default function PosPage() {
                     </p>
                     <ul className="list-inside list-disc text-xs">
                       {preview.lines.filter(isTrackedInsufficientLine).map((l) => (
-                        <li key={l.productId}>
+                        <li key={`${l.productId}-${l.variantId ?? ""}`}>
                           {l.name} — need {l.qty}, available{" "}
                           {l.stock.available === null ? "no stock row" : l.stock.available}
+                          {l.stock.requiresVariant ? " · pick a variant" : ""}
                         </li>
                       ))}
                     </ul>
@@ -809,6 +907,46 @@ export default function PosPage() {
               Issue receipt
             </Button>
           </div>
+
+          <Dialog
+            open={variantPickerOpen}
+            onOpenChange={(open) => {
+              setVariantPickerOpen(open)
+              if (!open) {
+                setVariantPickerProduct(null)
+                setVariantList([])
+              }
+            }}
+          >
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Choose variant</DialogTitle>
+                <DialogDescription>
+                  {variantPickerProduct ? `${variantPickerProduct.name} — pick a SKU variant for this line.` : "Pick a SKU variant for this line."}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex max-h-72 flex-col gap-2 overflow-y-auto py-2">
+                {variantList.map((v) => (
+                  <Button
+                    key={v.id}
+                    type="button"
+                    variant="outline"
+                    className="h-auto justify-start py-3 text-left"
+                    onClick={() => {
+                      if (!variantPickerProduct) return
+                      handleAddToCart(variantPickerProduct, v)
+                      setVariantPickerOpen(false)
+                      setVariantPickerProduct(null)
+                      setVariantList([])
+                    }}
+                  >
+                    <span className="block font-medium">{v.label}</span>
+                    <span className="block text-xs text-muted-foreground">{v.sku}</span>
+                  </Button>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
 
           {qrDataUrl ? (
             <Card className="border-dashed bg-muted/30">

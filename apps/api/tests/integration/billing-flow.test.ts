@@ -88,6 +88,15 @@ describe("billing: invoice → complete → payment → receipt", () => {
   })
 
   it("POST /invoices/:id/complete then POST /payments succeeds", async () => {
+    const before = await ctx.app.inject({
+      method: "GET",
+      url: `/invoices/${invoiceId}`,
+      headers: authBearer(token),
+    })
+    const draftRow = parseJson<{ success: true; data: { grandTotal: number; status: string } }>(before.body).data
+    expect(draftRow.status).toBe("draft")
+    const draftGrandTotal = draftRow.grandTotal
+
     const comp = await injectJson(ctx.app, "POST", `/invoices/${invoiceId}/complete`, {
       headers: authBearer(token),
       payload: {},
@@ -95,6 +104,7 @@ describe("billing: invoice → complete → payment → receipt", () => {
     expect(comp.statusCode).toBe(200)
     const completed = parseJson<{ success: true; data: { status: string; grandTotal: number } }>(comp.body).data
     expect(completed.status).toBe("completed")
+    expect(completed.grandTotal).toBe(draftGrandTotal)
 
     const pay = await injectJson(ctx.app, "POST", "/payments", {
       headers: authBearer(token),
@@ -107,6 +117,33 @@ describe("billing: invoice → complete → payment → receipt", () => {
     expect(pay.statusCode).toBe(201)
     const p = parseJson<{ success: true; data: { status: string } }>(pay.body).data
     expect(p.status).toBe("completed")
+  })
+
+  it("second draft invoice complete preserves grandTotal (billing orchestrator path)", async () => {
+    const draft = await injectJson(ctx.app, "POST", "/invoices", {
+      headers: authBearer(token),
+      payload: {
+        lines: [{ productId, qty: 1 }],
+      },
+    })
+    expect(draft.statusCode).toBe(201)
+    const id2 = parseJson<{ success: true; data: { id: string } }>(draft.body).data.id
+    const get = await ctx.app.inject({
+      method: "GET",
+      url: `/invoices/${id2}`,
+      headers: authBearer(token),
+    })
+    const row = parseJson<{ success: true; data: { grandTotal: number; status: string } }>(get.body).data
+    expect(row.status).toBe("draft")
+    const gt = row.grandTotal
+    const comp = await injectJson(ctx.app, "POST", `/invoices/${id2}/complete`, {
+      headers: authBearer(token),
+      payload: {},
+    })
+    expect(comp.statusCode).toBe(200)
+    const done = parseJson<{ success: true; data: { grandTotal: number; status: string } }>(comp.body).data
+    expect(done.status).toBe("completed")
+    expect(done.grandTotal).toBe(gt)
   })
 
   it("POST /receipts issues for paid invoice", async () => {

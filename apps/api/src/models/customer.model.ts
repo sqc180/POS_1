@@ -9,6 +9,8 @@ const customerSchema = new Schema(
     gstin: { type: String, trim: true },
     address: { type: String, trim: true },
     notes: { type: String, trim: true },
+    /** Credit limit in same currency units as invoices (decimal rupees until paise migration). */
+    creditLimit: { type: Number, min: 0, default: 0 },
     status: { type: String, enum: ["active", "inactive"], default: "active" },
   },
   { timestamps: true },

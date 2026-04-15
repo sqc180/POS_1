@@ -25,6 +25,7 @@ import {
   SelectValue,
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
@@ -234,6 +235,7 @@ export default function RefundsPage() {
         <SheetContent className="flex flex-col sm:max-w-md">
           <SheetHeader>
             <SheetTitle>Create refund</SheetTitle>
+            <SheetDescription>Record a refund against an invoice and optional payment.</SheetDescription>
           </SheetHeader>
           <Form {...form}>
             <form onSubmit={handleCreate} className="flex flex-1 flex-col gap-4 py-4">

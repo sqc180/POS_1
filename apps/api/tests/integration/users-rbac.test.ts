@@ -20,7 +20,7 @@ describe("users + RBAC", () => {
     await ctx.close()
   })
 
-  it("owner can POST /users (staff)", async () => {
+  it("owner can POST /users (staff) and rejects duplicate email in same tenant", async () => {
     const res = await injectJson(ctx.app, "POST", "/users", {
       headers: authBearer(ownerToken),
       payload: {
@@ -34,10 +34,8 @@ describe("users + RBAC", () => {
     const b = parseJson<{ success: true; data: { id: string; role: string } }>(res.body)
     expect(b.success).toBe(true)
     expect(b.data.role).toBe("cashier")
-  })
 
-  it("rejects duplicate email in same tenant", async () => {
-    const res = await injectJson(ctx.app, "POST", "/users", {
+    const dup = await injectJson(ctx.app, "POST", "/users", {
       headers: authBearer(ownerToken),
       payload: {
         email: "cashier1@qa.test",
@@ -46,8 +44,8 @@ describe("users + RBAC", () => {
         role: "viewer",
       },
     })
-    expect(res.statusCode).toBe(409)
-    expect(parseJson(res.body)).toMatchObject({ success: false })
+    expect(dup.statusCode).toBe(409)
+    expect(parseJson(dup.body)).toMatchObject({ success: false })
   })
 
   it("cashier cannot POST /users", async () => {

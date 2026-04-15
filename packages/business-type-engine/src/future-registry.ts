@@ -1,8 +1,8 @@
 import type { BusinessTypeId } from "@repo/types"
 
 /**
- * Planned business verticals — not yet selectable in onboarding.
- * Core ERP modules stay stable; new types extend feature maps and validators when enabled.
+ * Planned industry verticals (capability packs). Optional at onboarding as `pilotVertical`;
+ * core ERP `businessType` remains retail/supermart for feature maps until a broader migration.
  */
 export const FUTURE_BUSINESS_TYPE_ROADMAP = [
   { id: "pharmacy", label: "Pharmacy", modules: "Batch, expiry, schedule H readiness" },

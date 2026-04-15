@@ -104,4 +104,18 @@ export const supplierService = {
     })
     return toPublic(s)
   },
+
+  async getPayablesSnapshot(tenantId: string, supplierId: string) {
+    if (!mongoose.Types.ObjectId.isValid(supplierId)) {
+      const err = new Error("Invalid supplier")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    return {
+      billedTotal: 0,
+      amountPaidTotal: 0,
+      outstanding: 0,
+      note: "Posted purchase documents are not yet wired; this snapshot returns zero until procurement billing is integrated.",
+    }
+  },
 }

@@ -44,4 +44,14 @@ export const generateDocumentNumberStub = (prefix: string, seq: number): string 
 
 export * from "./gst.js"
 
+export {
+  exclusiveTaxPaise,
+  lineTotalExclusivePaise,
+  paiseToRupeesNumber,
+  rupeesToPaise,
+  sumPaise,
+} from "./money-paise.js"
+
+export type { Paise } from "./money-paise.js"
+
 export const idempotencyKey = (parts: string[]): string => parts.join(":")

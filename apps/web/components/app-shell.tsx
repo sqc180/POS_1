@@ -18,6 +18,9 @@ import {
   Separator,
   Sheet,
   SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
   SheetTrigger,
   Tooltip,
   TooltipContent,
@@ -63,14 +66,14 @@ const NavItemRow = ({
       aria-current={active ? "page" : undefined}
       className={cn(
         "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-150",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-foreground/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--sidebar))]",
         collapsed ? "justify-center px-2" : "",
         active
-          ? "bg-primary/12 text-primary shadow-elevate-sm before:absolute before:left-0 before:top-1/2 before:h-7 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-primary"
-          : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
+          ? "bg-sidebar-accent/95 text-sidebar-accent-foreground shadow-elevate-sm before:absolute before:left-0 before:top-1/2 before:h-7 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-sidebar-foreground"
+          : "text-sidebar-foreground/75 hover:bg-sidebar-accent/45 hover:text-sidebar-foreground",
       )}
     >
-      <Icon className={cn("h-5 w-5 shrink-0", active ? "text-primary" : "opacity-90")} aria-hidden />
+      <Icon className={cn("h-5 w-5 shrink-0", active ? "text-sidebar-accent-foreground" : "opacity-90")} aria-hidden />
       {!collapsed ? <span className="truncate">{item.label}</span> : null}
     </Link>
   )
@@ -128,13 +131,13 @@ const GroupedNav = ({
           key={group.key}
           open={openSections[group.key] ?? true}
           onOpenChange={(o) => setOpenSections((s) => ({ ...s, [group.key]: o }))}
-          className="group rounded-xl border border-transparent data-[state=open]:border-border/40 data-[state=open]:bg-card/40 data-[state=open]:shadow-elevate-sm dark:data-[state=open]:bg-card/25"
+          className="group rounded-xl border border-transparent data-[state=open]:border-sidebar-border/50 data-[state=open]:bg-sidebar-accent/20 data-[state=open]:shadow-elevate-sm"
         >
           <CollapsibleTrigger asChild>
             <Button
               type="button"
               variant="ghost"
-              className="flex h-10 w-full items-center justify-between gap-2 rounded-lg px-3 text-left text-[0.65rem] font-bold uppercase tracking-widest text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+              className="flex h-10 w-full items-center justify-between gap-2 rounded-lg px-3 text-left text-[0.65rem] font-bold uppercase tracking-widest text-sidebar-foreground/60 hover:bg-sidebar-accent/35 hover:text-sidebar-foreground"
             >
               <span className="truncate">{group.label}</span>
               <ChevronDown
@@ -232,21 +235,23 @@ export const AppShell = ({
     <div className="flex min-h-screen w-full bg-muted/40 dark:bg-muted/25">
       <aside
         className={cn(
-          "sticky top-0 hidden h-dvh max-h-dvh shrink-0 flex-col border-r border-sidebar-border bg-sidebar shadow-shell transition-[width] duration-200 ease-out lg:flex",
+          "sticky top-0 hidden h-dvh max-h-dvh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-shell transition-[width] duration-200 ease-out lg:flex",
           sidebarCollapsed ? "w-[4.5rem]" : "w-64",
         )}
       >
         {sidebarCollapsed ? (
           <div className="shrink-0 border-b border-sidebar-border px-2 py-3">
             <div className="flex flex-col items-center gap-2">
-              <Avatar className="h-10 w-10 rounded-xl border border-border/50 shadow-elevate-sm">
-                <AvatarFallback className="rounded-xl bg-primary/10 text-xs font-bold text-primary">{initials}</AvatarFallback>
+              <Avatar className="h-10 w-10 rounded-xl border border-sidebar-border/60 shadow-elevate-sm">
+                <AvatarFallback className="rounded-xl bg-sidebar-accent/50 text-xs font-bold text-sidebar-foreground">
+                  {initials}
+                </AvatarFallback>
               </Avatar>
               <Button
                 type="button"
                 variant="outline"
                 size="icon"
-                className="h-8 w-8 border-border/60"
+                className="h-8 w-8 border-sidebar-border/70 bg-sidebar-accent/25 text-sidebar-foreground hover:bg-sidebar-accent/45 hover:text-sidebar-foreground"
                 onClick={toggleCollapsed}
                 aria-label="Expand sidebar"
               >
@@ -258,10 +263,17 @@ export const AppShell = ({
           <div className="shrink-0 border-b border-sidebar-border px-3 py-3">
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1 space-y-1.5">
-                <p className="text-[0.65rem] font-semibold uppercase tracking-widest text-muted-foreground">Workspace</p>
-                <div className="text-sm font-semibold leading-snug tracking-tight text-foreground">{businessLabel}</div>
+                <p className="text-[0.65rem] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
+                  Workspace
+                </p>
+                <div className="text-sm font-semibold leading-snug tracking-tight text-sidebar-foreground">
+                  {businessLabel}
+                </div>
                 {typeLabel ? (
-                  <Badge variant="secondary" className="w-fit text-[0.65rem] font-medium capitalize">
+                  <Badge
+                    variant="outline"
+                    className="w-fit border-sidebar-border/70 bg-sidebar-accent/30 text-[0.65rem] font-medium capitalize text-sidebar-foreground"
+                  >
                     {typeLabel}
                   </Badge>
                 ) : null}
@@ -270,7 +282,7 @@ export const AppShell = ({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="mt-0.5 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                className="mt-0.5 h-8 w-8 shrink-0 text-sidebar-foreground/80 hover:bg-sidebar-accent/40 hover:text-sidebar-foreground"
                 onClick={toggleCollapsed}
                 aria-label="Collapse sidebar"
               >
@@ -299,12 +311,24 @@ export const AppShell = ({
                 <Menu className="h-5 w-5" aria-hidden />
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="w-[min(100vw-1rem,20rem)] border-sidebar-border bg-sidebar p-0 sm:max-w-md">
+            <SheetContent
+              side="left"
+              className="w-[min(100vw-1rem,20rem)] border-sidebar-border bg-sidebar p-0 text-sidebar-foreground sm:max-w-md"
+            >
+              <SheetHeader className="sr-only">
+                <SheetTitle>Main menu</SheetTitle>
+                <SheetDescription>Workspace navigation and module links for small screens.</SheetDescription>
+              </SheetHeader>
               <div className="border-b border-sidebar-border px-4 py-4">
-                <p className="text-[0.65rem] font-semibold uppercase tracking-widest text-muted-foreground">Workspace</p>
-                <div className="mt-1 text-sm font-semibold">{businessLabel}</div>
+                <p className="text-[0.65rem] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
+                  Workspace
+                </p>
+                <div className="mt-1 text-sm font-semibold text-sidebar-foreground">{businessLabel}</div>
                 {typeLabel ? (
-                  <Badge variant="secondary" className="mt-2 w-fit text-[0.65rem] capitalize">
+                  <Badge
+                    variant="outline"
+                    className="mt-2 w-fit border-sidebar-border/70 bg-sidebar-accent/30 text-[0.65rem] capitalize text-sidebar-foreground"
+                  >
                     {typeLabel}
                   </Badge>
                 ) : null}
@@ -373,7 +397,7 @@ export const AppShell = ({
             </div>
           </div>
         </header>
-        <main className="relative flex-1 bg-gradient-to-b from-background via-background to-muted/30 p-4 sm:p-6 lg:p-8">
+        <main className="relative flex-1 bg-gradient-to-b from-background via-background to-accent/35 p-4 sm:p-6 lg:p-8">
           <div className="mx-auto w-full max-w-content">{children}</div>
         </main>
       </div>

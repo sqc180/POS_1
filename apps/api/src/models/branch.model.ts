@@ -10,6 +10,16 @@ const branchSchema = new Schema(
     notes: { type: String, default: "", trim: true },
     status: { type: String, enum: ["active", "inactive"], default: "active" },
     sortOrder: { type: Number, default: 0 },
+    /** Optional pilot vertical for this branch — overrides tenant `pilotVertical` for capability resolution. */
+    businessTypeSlug: { type: String, trim: true, default: "" },
+    /** Extra capability pack ids (roadmap slugs) whose flags are unioned onto the branch base. */
+    enabledPackIds: { type: [String], default: [] },
+    /** Counter / POS mode hint for this branch (UI + future server rules). */
+    posMode: {
+      type: String,
+      enum: ["standard", "high_volume", "table_service", "field"],
+      default: "standard",
+    },
   },
   { timestamps: true },
 )

@@ -4,6 +4,10 @@ const tenantSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     businessType: { type: String, required: true, enum: ["retail", "supermart"] },
+    /** Optional roadmap vertical for capability flags; not a replacement for businessType. */
+    pilotVertical: { type: String, trim: true, default: null },
+    /** Extra capability pack ids (roadmap slugs) unioned at tenant scope. */
+    enabledPackIds: { type: [String], default: [] },
     status: { type: String, required: true, enum: ["active", "suspended"], default: "active" },
   },
   { timestamps: true },

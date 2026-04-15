@@ -40,6 +40,7 @@ import {
   TableRow,
   Textarea,
 } from "@repo/ui"
+import { CAPABILITY_PACKS } from "@repo/business-type-engine"
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
@@ -57,6 +58,9 @@ type BranchRow = {
   notes: string
   status: "active" | "inactive"
   sortOrder: number
+  businessTypeSlug: string | null
+  enabledPackIds: string[]
+  posMode: "standard" | "high_volume" | "table_service" | "field"
 }
 
 const createSchema = z.object({
@@ -78,6 +82,9 @@ const editSchema = z.object({
   address: z.string().optional(),
   notes: z.string().optional(),
   sortOrder: z.coerce.number().optional(),
+  businessTypeSlug: z.string().max(64).optional(),
+  enabledPackIdsCsv: z.string().optional(),
+  posMode: z.enum(["standard", "high_volume", "table_service", "field"]),
 })
 
 type CreateValues = z.infer<typeof createSchema>
@@ -92,7 +99,16 @@ const defaultCreate: CreateValues = {
   sortOrder: 0,
 }
 
-const defaultEdit: EditValues = { name: "", kind: "shop", address: "", notes: "", sortOrder: 0 }
+const defaultEdit: EditValues = {
+  name: "",
+  kind: "shop",
+  address: "",
+  notes: "",
+  sortOrder: 0,
+  businessTypeSlug: "",
+  enabledPackIdsCsv: "",
+  posMode: "standard",
+}
 
 const kindLabel = (k: BranchRow["kind"]) =>
   k === "shop" ? "Shop / front" : k === "warehouse" ? "Warehouse" : "Other"
@@ -100,9 +116,17 @@ const kindLabel = (k: BranchRow["kind"]) =>
 const kindBadgeVariant = (k: BranchRow["kind"]): "default" | "secondary" | "outline" =>
   k === "shop" ? "default" : k === "warehouse" ? "secondary" : "outline"
 
+const parsePackIdsCsv = (raw: string | undefined): string[] =>
+  (raw ?? "")
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
 export default function BranchesPage() {
   const { me } = useAuth()
   const canMutate = me?.permissions.includes("branches.manage") ?? false
+  const canEditBranchPacks =
+    canMutate && (me?.user.role === "owner" || me?.user.role === "admin")
 
   const [rows, setRows] = useState<BranchRow[]>([])
   const [open, setOpen] = useState(false)
@@ -154,6 +178,9 @@ export default function BranchesPage() {
         address: editRow.address || "",
         notes: editRow.notes || "",
         sortOrder: editRow.sortOrder,
+        businessTypeSlug: editRow.businessTypeSlug ?? "",
+        enabledPackIdsCsv: (editRow.enabledPackIds ?? []).join(", "),
+        posMode: editRow.posMode ?? "standard",
       })
     } else {
       createForm.reset(defaultCreate)
@@ -194,6 +221,8 @@ export default function BranchesPage() {
 
   const handleEdit = editForm.handleSubmit(async (values) => {
     if (!editRow) return
+    const packIds = parsePackIdsCsv(values.enabledPackIdsCsv)
+    const slugTrim = values.businessTypeSlug?.trim() ?? ""
     const res = await apiRequest<BranchRow>(`/branches/${editRow.id}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -202,6 +231,13 @@ export default function BranchesPage() {
         address: values.address || undefined,
         notes: values.notes || undefined,
         sortOrder: values.sortOrder,
+        ...(canEditBranchPacks
+          ? {
+              businessTypeSlug: slugTrim === "" ? null : slugTrim,
+              enabledPackIds: packIds,
+              posMode: values.posMode,
+            }
+          : {}),
       }),
     })
     if (!res.success) {
@@ -367,6 +403,86 @@ export default function BranchesPage() {
                       </FormItem>
                     )}
                   />
+                  {canEditBranchPacks ? (
+                    <>
+                      <div className="rounded-lg border border-border/80 bg-muted/30 p-3">
+                        <p className="text-sm font-medium text-foreground">Operating mode (this branch)</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Overrides tenant pilot vertical for capability resolution. Leave blank to inherit tenant settings.
+                        </p>
+                      </div>
+                      <FormField
+                        control={editForm.control}
+                        name="businessTypeSlug"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Branch business pack</FormLabel>
+                            <Select
+                              onValueChange={(v) => field.onChange(v === "__inherit__" ? "" : v)}
+                              value={field.value === "" || !field.value ? "__inherit__" : field.value}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Inherit from tenant" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="__inherit__">Inherit from tenant</SelectItem>
+                                {CAPABILITY_PACKS.map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>
+                                    {p.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={editForm.control}
+                        name="enabledPackIdsCsv"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Extra pack ids (optional)</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="e.g. grocery, wholesale"
+                                className="font-mono text-sm"
+                                {...field}
+                                value={field.value ?? ""}
+                              />
+                            </FormControl>
+                            <FormDescription>Comma-separated roadmap pack ids; flags are unioned with the branch base.</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={editForm.control}
+                        name="posMode"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>POS mode hint</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="standard">Standard counter</SelectItem>
+                                <SelectItem value="high_volume">High volume</SelectItem>
+                                <SelectItem value="table_service">Table service</SelectItem>
+                                <SelectItem value="field">Field / van</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </>
+                  ) : null}
                   <SheetFooter className="mt-auto gap-2 sm:justify-end">
                     <Button type="submit" disabled={editForm.formState.isSubmitting}>
                       {editForm.formState.isSubmitting ? "Saving…" : "Save changes"}
@@ -499,6 +615,7 @@ export default function BranchesPage() {
               <TableHead>Code</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Type</TableHead>
+              <TableHead>Pack</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -510,6 +627,15 @@ export default function BranchesPage() {
                 <TableCell className="font-medium">{b.name}</TableCell>
                 <TableCell>
                   <Badge variant={kindBadgeVariant(b.kind)}>{kindLabel(b.kind)}</Badge>
+                </TableCell>
+                <TableCell className="max-w-[10rem]">
+                  {b.businessTypeSlug ? (
+                    <Badge variant="outline" className="font-mono text-xs">
+                      {b.businessTypeSlug}
+                    </Badge>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Tenant default</span>
+                  )}
                 </TableCell>
                 <TableCell>
                   <Badge variant={b.status === "active" ? "default" : "secondary"}>{b.status}</Badge>

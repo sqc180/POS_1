@@ -28,6 +28,7 @@ import {
   SelectValue,
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
@@ -39,27 +40,43 @@ import {
   TableRow,
 } from "@repo/ui"
 import Link from "next/link"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
+import { useAuth } from "@/components/auth-provider"
 import { apiRequest } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/notify"
+import { DynamicProductPresetFields } from "@/components/shared/dynamic-form/DynamicProductPresetFields"
+import { getProductFieldHintsForMe } from "@/lib/product-field-hints"
 
 type ProductRow = {
   id: string
   name: string
   sku: string
+  internalCode?: string
+  hsnSac?: string
+  catalogLifecycle?: string
   sellingPrice: number
   status: string
   trackStock: boolean
+  variantMode?: "none" | "optional" | "required"
+  batchTracking?: boolean
+  serialTracking?: boolean
+  saleUom?: string
+  isLoose?: boolean
 }
 
 type CategoryRow = { id: string; name: string }
 type GstSlabRow = { id: string; name: string; cgstRate: number; sgstRate: number }
 
+type PagedProducts = { items: ProductRow[]; total: number; skip: number; limit: number }
+
 const schema = z.object({
   name: z.string().min(1),
   sku: z.string().min(1),
+  internalCode: z.string().optional(),
+  hsnSac: z.string().optional(),
+  catalogLifecycle: z.enum(["active", "discontinued", "archived"]).optional(),
   barcode: z.string().optional(),
   categoryId: z.string().optional(),
   gstSlabId: z.string().optional(),
@@ -70,40 +87,71 @@ const schema = z.object({
   trackStock: z.boolean().optional(),
   brand: z.string().optional(),
   unit: z.string().optional(),
+  saleUom: z.string().optional(),
+  isLoose: z.boolean().optional(),
 })
 
 export default function ProductsPage() {
+  const { me } = useAuth()
+  const presetHints = useMemo(
+    () => getProductFieldHintsForMe(me?.tenant.capabilities, me?.productFieldHints),
+    [me?.tenant.capabilities, me?.productFieldHints],
+  )
+  const groceryFields = presetHints.some((h) => h.key === "saleUom" && h.visible)
   const [rows, setRows] = useState<ProductRow[]>([])
+  const [total, setTotal] = useState(0)
+  const [skip, setSkip] = useState(0)
+  const limit = 25
   const [q, setQ] = useState("")
+  const [filterCategoryId, setFilterCategoryId] = useState<string>("__all__")
+  const [filterLifecycle, setFilterLifecycle] = useState<string>("all")
+  const [sortField, setSortField] = useState<"updatedAt" | "name" | "sku" | "sellingPrice">("updatedAt")
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
   const [open, setOpen] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [categories, setCategories] = useState<CategoryRow[]>([])
   const [gstSlabs, setGstSlabs] = useState<GstSlabRow[]>([])
 
   const load = useCallback(async () => {
-    const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""
-    const res = await apiRequest<ProductRow[]>(`/products${qs}`)
+    const params = new URLSearchParams()
+    params.set("paged", "true")
+    params.set("limit", String(limit))
+    params.set("skip", String(skip))
+    if (q.trim()) params.set("q", q.trim())
+    if (filterCategoryId !== "__all__") params.set("categoryId", filterCategoryId)
+    if (filterLifecycle !== "all") params.set("catalogLifecycle", filterLifecycle)
+    params.set("sort", sortField)
+    params.set("order", sortOrder)
+    const res = await apiRequest<PagedProducts>(`/products?${params.toString()}`)
     if (res.success) {
-      setRows(res.data)
+      setRows(res.data.items)
+      setTotal(res.data.total)
       setLoadError(null)
     } else {
       setLoadError(res.error.message)
       notifyError(res.error.message)
     }
-  }, [q])
+  }, [skip, q, filterCategoryId, filterLifecycle, sortField, sortOrder])
 
   useEffect(() => {
     void load()
   }, [load])
 
   useEffect(() => {
+    void (async () => {
+      const cRes = await apiRequest<CategoryRow[]>("/categories")
+      if (cRes.success) setCategories(cRes.data)
+    })()
+  }, [])
+
+  useEffect(() => {
+    setSkip(0)
+  }, [q, filterCategoryId, filterLifecycle, sortField, sortOrder])
+
+  useEffect(() => {
     if (!open) return
     void (async () => {
-      const [cRes, gRes] = await Promise.all([
-        apiRequest<CategoryRow[]>("/categories"),
-        apiRequest<GstSlabRow[]>("/gst-slabs"),
-      ])
-      if (cRes.success) setCategories(cRes.data)
+      const gRes = await apiRequest<GstSlabRow[]>("/gst-slabs")
       if (gRes.success) setGstSlabs(gRes.data)
     })()
   }, [open])
@@ -113,6 +161,9 @@ export default function ProductsPage() {
     defaultValues: {
       name: "",
       sku: "",
+      internalCode: "",
+      hsnSac: "",
+      catalogLifecycle: "active",
       barcode: "",
       categoryId: "__none__",
       gstSlabId: "__none__",
@@ -123,6 +174,8 @@ export default function ProductsPage() {
       trackStock: true,
       brand: "",
       unit: "",
+      saleUom: "",
+      isLoose: false,
     },
   })
 
@@ -133,9 +186,18 @@ export default function ProductsPage() {
       gstSlabId: values.gstSlabId === "__none__" ? undefined : values.gstSlabId,
       taxMode: values.taxMode,
       barcode: values.barcode || undefined,
+      internalCode: values.internalCode?.trim() || undefined,
+      hsnSac: values.hsnSac?.trim() || undefined,
+      catalogLifecycle: values.catalogLifecycle,
       brand: values.brand || undefined,
       unit: values.unit || undefined,
       trackStock: values.trackStock,
+      ...(groceryFields
+        ? {
+            saleUom: values.saleUom?.trim() || undefined,
+            isLoose: values.isLoose,
+          }
+        : {}),
     }
     const res = await apiRequest<ProductRow>("/products", { method: "POST", body: JSON.stringify(body) })
     if (!res.success) {
@@ -156,8 +218,52 @@ export default function ProductsPage() {
           <h1 className="text-2xl font-semibold">Products</h1>
           <p className="text-sm text-muted-foreground">SKU, barcode-ready, GST mapping, category, and stock flag.</p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Input placeholder="Search name / SKU / barcode" value={q} onChange={(e) => setQ(e.target.value)} className="sm:w-64" />
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <Input placeholder="Search name / SKU / barcode / HSN" value={q} onChange={(e) => setQ(e.target.value)} className="sm:w-64" />
+          <Select value={filterCategoryId} onValueChange={setFilterCategoryId}>
+            <SelectTrigger className="sm:w-48" aria-label="Filter by category">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All categories</SelectItem>
+              {categories.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterLifecycle} onValueChange={setFilterLifecycle}>
+            <SelectTrigger className="sm:w-44" aria-label="Filter by lifecycle">
+              <SelectValue placeholder="Lifecycle" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All lifecycles</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="discontinued">Discontinued</SelectItem>
+              <SelectItem value="archived">Archived</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={sortField} onValueChange={(v) => setSortField(v as typeof sortField)}>
+            <SelectTrigger className="sm:w-44" aria-label="Sort by">
+              <SelectValue placeholder="Sort" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="updatedAt">Updated</SelectItem>
+              <SelectItem value="name">Name</SelectItem>
+              <SelectItem value="sku">SKU</SelectItem>
+              <SelectItem value="sellingPrice">Price</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as typeof sortOrder)}>
+            <SelectTrigger className="sm:w-36" aria-label="Sort order">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="desc">Desc</SelectItem>
+              <SelectItem value="asc">Asc</SelectItem>
+            </SelectContent>
+          </Select>
           <Button onClick={() => setOpen(true)}>New product</Button>
         </div>
       </div>
@@ -171,6 +277,7 @@ export default function ProductsPage() {
         <SheetContent className="flex flex-col sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>New product</SheetTitle>
+            <SheetDescription>Add a sellable item to your catalog. SKU must be unique.</SheetDescription>
           </SheetHeader>
           <Form {...form}>
             <form onSubmit={handleCreate} className="flex flex-1 flex-col gap-3 overflow-y-auto py-4">
@@ -206,6 +313,55 @@ export default function ProductsPage() {
                   </FormItem>
                 )}
               />
+              <FormField
+                control={form.control}
+                name="internalCode"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Internal code</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="hsnSac"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>HSN / SAC</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="catalogLifecycle"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Catalog lifecycle</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="discontinued">Discontinued</SelectItem>
+                        <SelectItem value="archived">Archived</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DynamicProductPresetFields control={form.control} hints={presetHints} />
               <FormField
                 control={form.control}
                 name="barcode"
@@ -360,6 +516,8 @@ export default function ProductsPage() {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>SKU</TableHead>
+              <TableHead>HSN</TableHead>
+              <TableHead>Lifecycle</TableHead>
               <TableHead>Price</TableHead>
               <TableHead>Stock</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -368,8 +526,37 @@ export default function ProductsPage() {
           <TableBody>
             {rows.map((p) => (
               <TableRow key={p.id}>
-                <TableCell className="font-medium">{p.name}</TableCell>
-                <TableCell>{p.sku}</TableCell>
+                <TableCell className="font-medium">
+                  <span className="block">{p.name}</span>
+                  {p.variantMode && p.variantMode !== "none" ? (
+                    <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                      Variants: {p.variantMode}
+                      {p.batchTracking ? " · Batch" : ""}
+                      {p.serialTracking ? " · Serial" : ""}
+                    </span>
+                  ) : p.batchTracking || p.serialTracking ? (
+                    <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                      {[p.batchTracking ? "Batch" : null, p.serialTracking ? "Serial" : null].filter(Boolean).join(" · ")}
+                    </span>
+                  ) : null}
+                  {p.saleUom || p.isLoose ? (
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {p.saleUom ? `UOM: ${p.saleUom}` : ""}
+                      {p.saleUom && p.isLoose ? " · " : ""}
+                      {p.isLoose ? "Loose" : ""}
+                    </span>
+                  ) : null}
+                </TableCell>
+                <TableCell>
+                  <span className="font-mono text-sm">{p.sku}</span>
+                  {p.internalCode ? (
+                    <span className="mt-0.5 block text-xs text-muted-foreground">Int: {p.internalCode}</span>
+                  ) : null}
+                </TableCell>
+                <TableCell className="font-mono text-sm">{p.hsnSac || "—"}</TableCell>
+                <TableCell>
+                  <Badge variant="outline">{p.catalogLifecycle ?? "active"}</Badge>
+                </TableCell>
                 <TableCell>₹{p.sellingPrice.toFixed(2)}</TableCell>
                 <TableCell>
                   <Badge variant={p.trackStock ? "secondary" : "outline"}>{p.trackStock ? "Tracked" : "No stock"}</Badge>
@@ -401,6 +588,19 @@ export default function ProductsPage() {
             ))}
           </TableBody>
         </Table>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm text-muted-foreground">
+          <span>
+            {total === 0 ? "No products" : `Showing ${skip + 1}–${Math.min(skip + rows.length, total)} of ${total}`}
+          </span>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={skip === 0} onClick={() => setSkip((s) => Math.max(0, s - limit))}>
+              Previous
+            </Button>
+            <Button type="button" variant="outline" size="sm" disabled={skip + limit >= total} onClick={() => setSkip((s) => s + limit)}>
+              Next
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   )

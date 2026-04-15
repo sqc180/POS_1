@@ -1,5 +1,6 @@
 import mongoose from "mongoose"
 import { CustomerModel, type CustomerDoc } from "../models/customer.model.js"
+import { InvoiceModel } from "../models/invoice.model.js"
 import { auditService } from "./audit.service.js"
 
 const toPublic = (c: CustomerDoc) => ({
@@ -11,6 +12,7 @@ const toPublic = (c: CustomerDoc) => ({
   gstin: c.gstin ?? "",
   address: c.address ?? "",
   notes: c.notes ?? "",
+  creditLimit: (c as { creditLimit?: number }).creditLimit ?? 0,
   status: c.status,
   createdAt: c.createdAt?.toISOString?.() ?? "",
   updatedAt: c.updatedAt?.toISOString?.() ?? "",
@@ -75,6 +77,7 @@ export const customerService = {
       gstin: string
       address: string
       notes: string
+      creditLimit: number
       status: string
     }>,
   ) {
@@ -93,6 +96,9 @@ export const customerService = {
       throw err
     }
     Object.assign(c, input)
+    if (input.creditLimit !== undefined) {
+      ;(c as { creditLimit?: number }).creditLimit = Math.max(0, input.creditLimit)
+    }
     if (input.status !== undefined) c.status = input.status as "active" | "inactive"
     await c.save()
     await auditService.log({
@@ -103,5 +109,54 @@ export const customerService = {
       entityId: c._id.toString(),
     })
     return toPublic(c)
+  },
+
+  async getReceivableSnapshot(tenantId: string, customerId: string) {
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      const err = new Error("Invalid customer")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const custOid = new mongoose.Types.ObjectId(customerId)
+    const tenantOid = new mongoose.Types.ObjectId(tenantId)
+    const agg = await InvoiceModel.aggregate<{
+      invoiced: number
+      paid: number
+      openCount: number
+    }>([
+      {
+        $match: {
+          tenantId: tenantOid,
+          customerId: custOid,
+          status: "completed",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          invoiced: { $sum: "$grandTotal" },
+          paid: { $sum: "$amountPaid" },
+          openCount: {
+            $sum: {
+              $cond: [{ $lt: ["$amountPaid", "$grandTotal"] }, 1, 0],
+            },
+          },
+        },
+      },
+    ])
+    const row = agg[0]
+    const invoiced = row?.invoiced ?? 0
+    const paid = row?.paid ?? 0
+    const outstanding = Math.round((invoiced - paid) * 100) / 100
+    const c = await CustomerModel.findOne({ _id: custOid, tenantId: tenantOid })
+    const creditLimit = (c as { creditLimit?: number } | null)?.creditLimit ?? 0
+    return {
+      invoicedTotal: invoiced,
+      amountPaidTotal: paid,
+      outstanding,
+      creditLimit,
+      openInvoiceCount: row?.openCount ?? 0,
+      creditExceeded: creditLimit > 0 && outstanding > creditLimit,
+    }
   },
 }

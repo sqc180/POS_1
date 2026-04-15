@@ -5,6 +5,7 @@ import {
   Alert,
   AlertDescription,
   AlertTitle,
+  Badge,
   Button,
   Card,
   CardContent,
@@ -69,10 +70,11 @@ const SettingsFormSkeleton = () => (
 )
 
 export default function SettingsPage() {
-  const { me } = useAuth()
+  const { me, refresh } = useAuth()
   const [loaded, setLoaded] = useState<Settings | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [branchOptions, setBranchOptions] = useState<BranchOpt[]>([])
+  const [pilotSaving, setPilotSaving] = useState(false)
   const form = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -124,6 +126,25 @@ export default function SettingsPage() {
     setLoaded(res.data)
     notifySuccess("Settings saved")
   })
+
+  const canSetPilotVertical = me?.user.role === "owner" || me?.user.role === "admin"
+
+  const handlePilotVerticalChange = async (value: string) => {
+    if (!canSetPilotVertical) return
+    setPilotSaving(true)
+    const pilotVertical = value === "__none__" ? null : value
+    const res = await apiRequest<{ pilotVertical: string | null }>("/settings/pilot-vertical", {
+      method: "PATCH",
+      body: JSON.stringify({ pilotVertical }),
+    })
+    setPilotSaving(false)
+    if (!res.success) {
+      notifyError(res.error.message)
+      return
+    }
+    notifySuccess("Pilot vertical updated")
+    await refresh()
+  }
 
   const handleCopyWorkspaceId = async () => {
     const id = me?.tenant.id
@@ -219,6 +240,55 @@ export default function SettingsPage() {
               ))}
             </ul>
           </div>
+          {canSetPilotVertical ? (
+            <div className="space-y-3 rounded-lg border p-4">
+              <div>
+                <p className="text-sm font-medium">Pilot vertical (optional)</p>
+                <p className="text-xs text-muted-foreground">
+                  Enables capability flags for future modules. Does not change billing type ({me?.tenant.businessType}).
+                </p>
+              </div>
+              <Select
+                disabled={pilotSaving}
+                value={me?.tenant.pilotVertical ?? "__none__"}
+                onValueChange={(v) => void handlePilotVerticalChange(v)}
+              >
+                <SelectTrigger className="max-w-md" aria-label="Pilot vertical">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None (core retail engine only)</SelectItem>
+                  {FUTURE_BUSINESS_TYPE_ROADMAP.map((row) => (
+                    <SelectItem key={row.id} value={row.id}>
+                      {row.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {me?.tenant.capabilities && me.tenant.capabilities.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {me.tenant.capabilities.map((c) => (
+                    <Badge key={c} variant="secondary" className="font-mono text-xs">
+                      {c}
+                    </Badge>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">No extra capabilities until a pilot vertical is selected.</p>
+              )}
+              {me?.tenant.behaviorHints?.posShellRoute ? (
+                <div className="flex flex-col gap-2 rounded-md border border-dashed border-border/80 bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    Resolved industry shell (from capability packs). POS mode:{" "}
+                    <span className="font-mono text-foreground">{me.tenant.behaviorHints.defaultPosMode}</span>
+                  </p>
+                  <Button type="button" variant="secondary" size="sm" className="w-full shrink-0 sm:w-auto" asChild>
+                    <Link href={me.tenant.behaviorHints.posShellRoute}>Open industry POS</Link>
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
       <Card>
