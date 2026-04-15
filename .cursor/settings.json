@@ -2,6 +2,9 @@
   "plugins": {
     "mongodb": {
       "enabled": true
+    },
+    "postman": {
+      "enabled": true
     }
   }
 }

@@ -28,6 +28,7 @@ import {
   SelectValue,
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
@@ -276,6 +277,7 @@ export default function ProductsPage() {
         <SheetContent className="flex flex-col sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>New product</SheetTitle>
+            <SheetDescription>Add a sellable item to your catalog. SKU must be unique.</SheetDescription>
           </SheetHeader>
           <Form {...form}>
             <form onSubmit={handleCreate} className="flex flex-1 flex-col gap-3 overflow-y-auto py-4">

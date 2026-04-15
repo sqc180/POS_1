@@ -18,6 +18,7 @@ import {
   CommandList,
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   Input,
@@ -694,12 +695,15 @@ export default function PosPage() {
               {invoice.invoiceNumber ? <span className="text-muted-foreground">#{invoice.invoiceNumber}</span> : null}
               <span className="text-muted-foreground">Due: ₹{remaining.toFixed(2)}</span>
               {verifyState === "pending" ? (
-                <Badge variant="outline" className="border-amber-500/60 text-amber-700 dark:text-amber-400">
+                <Badge
+                  variant="outline"
+                  className="border-warning/55 bg-warning/10 text-warning-foreground hover:bg-warning/15"
+                >
                   Verifying…
                 </Badge>
               ) : null}
               {verifyState === "verified" ? (
-                <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600">
+                <Badge variant="default" className="bg-success text-success-foreground hover:bg-success/90">
                   Razorpay verified
                 </Badge>
               ) : null}
@@ -917,10 +921,10 @@ export default function PosPage() {
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Choose variant</DialogTitle>
+                <DialogDescription>
+                  {variantPickerProduct ? `${variantPickerProduct.name} — pick a SKU variant for this line.` : "Pick a SKU variant for this line."}
+                </DialogDescription>
               </DialogHeader>
-              <p className="text-sm text-muted-foreground">
-                {variantPickerProduct ? `${variantPickerProduct.name} — pick a SKU variant for this line.` : ""}
-              </p>
               <div className="flex max-h-72 flex-col gap-2 overflow-y-auto py-2">
                 {variantList.map((v) => (
                   <Button

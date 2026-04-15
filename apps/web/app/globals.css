@@ -2,88 +2,110 @@
 
 /*
   App theme: light / dark via `class="dark"` on <html> (next-themes).
-  Retail vs supermart: `data-business` on <html> from the signed-in shell (subtle accent shift).
+  Retail vs supermart: `data-business` on <html> from the signed-in shell (primary/accent/ring shift).
+  Warm POS palette — easy on the eyes for long sessions:
+    - Canvas: warm paper (high L, slight yellow/orange hue) → --background, --muted
+    - Ink: low-chroma warm charcoal → --foreground, body text
+    - Cards: near-white with a hint of warmth
+    - Primary (default tenant): deep umber / warm brown CTA
+    - Sidebar: deep warm espresso with muted bronze accents (hover/active)
+    - Semantic: --success / --warning for payment and status badges (see tailwind.config)
   --content-max: main column width inside the shell.
   No @layer here — Turbopack requires @tailwind base in the imported UI file for @layer base.
+  ::selection uses raw hsl(.../alpha) — @apply bg-primary/18 is invalid in Tailwind @apply (no such utility).
 */
 :root {
   --content-max: 1400px;
-  --background: 220 18% 98%;
-  --foreground: 222 47% 11%;
-  --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222 47% 11%;
-  --primary: 222 47% 11%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 220 14% 96%;
-  --secondary-foreground: 222 47% 11%;
-  --muted: 220 14% 96%;
-  --muted-foreground: 220 9% 42%;
-  --accent: 220 14% 94%;
-  --accent-foreground: 222 47% 11%;
+  --background: 40 32% 96.5%;
+  --foreground: 24 20% 14%;
+  --card: 40 28% 99.4%;
+  --card-foreground: 24 20% 14%;
+  --popover: 40 28% 99.4%;
+  --popover-foreground: 24 20% 14%;
+  --primary: 24 42% 30%;
+  --primary-foreground: 40 40% 98%;
+  --secondary: 38 24% 93%;
+  --secondary-foreground: 24 22% 18%;
+  --muted: 38 22% 93.5%;
+  --muted-foreground: 28 10% 42%;
+  --accent: 35 28% 91.5%;
+  --accent-foreground: 24 20% 16%;
   --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 100%;
-  --border: 220 13% 90%;
-  --input: 220 13% 90%;
-  --ring: 222 47% 11%;
+  --border: 35 16% 86%;
+  --input: 35 16% 86%;
+  --ring: 24 42% 30%;
   --radius: 0.75rem;
-  --sidebar: 220 16% 99%;
-  --sidebar-border: 220 13% 91%;
+  --success: 152 42% 34%;
+  --success-foreground: 0 0% 100%;
+  --warning: 38 88% 48%;
+  --warning-foreground: 24 24% 12%;
+  --sidebar: 24 22% 12%;
+  --sidebar-foreground: 40 35% 97%;
+  --sidebar-border: 28 16% 26%;
+  --sidebar-accent: 30 18% 28%;
+  --sidebar-accent-foreground: 40 35% 97%;
 }
 
 .dark {
-  --background: 224 71% 5%;
-  --foreground: 213 31% 92%;
-  --card: 222 47% 7%;
-  --card-foreground: 213 31% 92%;
-  --popover: 222 47% 7%;
-  --popover-foreground: 213 31% 92%;
-  --primary: 210 40% 98%;
-  --primary-foreground: 222 47% 8%;
-  --secondary: 217 19% 15%;
-  --secondary-foreground: 213 31% 92%;
-  --muted: 217 19% 15%;
-  --muted-foreground: 215 16% 65%;
-  --accent: 217 19% 18%;
-  --accent-foreground: 213 31% 92%;
+  --background: 22 14% 9%;
+  --foreground: 38 22% 96%;
+  --card: 22 13% 12.5%;
+  --card-foreground: 38 22% 96%;
+  --popover: 22 13% 12.5%;
+  --popover-foreground: 38 22% 96%;
+  --primary: 38 32% 92%;
+  --primary-foreground: 22 18% 10%;
+  --secondary: 22 12% 18%;
+  --secondary-foreground: 38 22% 96%;
+  --muted: 22 11% 16%;
+  --muted-foreground: 32 12% 62%;
+  --accent: 24 12% 19%;
+  --accent-foreground: 38 22% 96%;
   --destructive: 0 62% 48%;
   --destructive-foreground: 0 0% 100%;
-  --border: 217 19% 18%;
-  --input: 217 19% 18%;
-  --ring: 213 31% 80%;
-  --sidebar: 222 47% 6%;
-  --sidebar-border: 217 19% 16%;
+  --border: 22 10% 21%;
+  --input: 22 10% 21%;
+  --ring: 36 28% 68%;
+  --success: 152 38% 42%;
+  --success-foreground: 0 0% 100%;
+  --warning: 40 88% 52%;
+  --warning-foreground: 22 22% 10%;
+  --sidebar: 22 16% 10.5%;
+  --sidebar-foreground: 38 22% 96%;
+  --sidebar-border: 22 10% 20%;
+  --sidebar-accent: 28 14% 22%;
+  --sidebar-accent-foreground: 38 22% 96%;
 }
 
-/* Retail: warm-neutral primary + slightly warmer surfaces */
+/* Retail: deeper warm-brown primary + cream accent strip */
 :root[data-business="retail"] {
-  --primary: 24 10% 12%;
-  --primary-foreground: 40 30% 98%;
-  --ring: 24 10% 12%;
-  --accent: 32 28% 93%;
+  --primary: 20 38% 22%;
+  --primary-foreground: 40 42% 98%;
+  --ring: 20 38% 22%;
+  --accent: 32 32% 92%;
 }
 
 .dark[data-business="retail"] {
-  --primary: 40 25% 96%;
-  --primary-foreground: 24 12% 8%;
-  --ring: 40 30% 70%;
-  --accent: 28 18% 14%;
+  --primary: 38 38% 94%;
+  --primary-foreground: 18 22% 8%;
+  --ring: 36 32% 62%;
+  --accent: 26 16% 15%;
 }
 
-/* Supermart: cooler blue-accent primary (distinct from retail, same scale) */
+/* Supermart: cooler teal-blue primary (distinct on warm canvas) */
 :root[data-business="supermart"] {
-  --primary: 215 85% 34%;
-  --primary-foreground: 210 40% 99%;
-  --ring: 215 85% 34%;
-  --accent: 214 32% 93%;
+  --primary: 199 52% 36%;
+  --primary-foreground: 195 60% 98%;
+  --ring: 199 52% 36%;
+  --accent: 200 28% 92%;
 }
 
 .dark[data-business="supermart"] {
-  --primary: 213 55% 88%;
-  --primary-foreground: 222 47% 9%;
-  --ring: 213 50% 65%;
-  --accent: 217 28% 14%;
+  --primary: 198 55% 82%;
+  --primary-foreground: 210 40% 10%;
+  --ring: 198 45% 58%;
+  --accent: 205 22% 16%;
 }
 
 body {
@@ -92,9 +114,11 @@ body {
 }
 
 ::selection {
-  @apply bg-primary/15 text-foreground;
+  background-color: hsl(var(--primary) / 0.18);
+  color: hsl(var(--foreground));
 }
 
 .dark ::selection {
-  @apply bg-primary/25;
+  background-color: hsl(var(--primary) / 0.28);
+  color: hsl(var(--foreground));
 }

@@ -66,9 +66,7 @@ export const createStoredDocumentService = (
   }): Promise<FileAssetDoc> => {
     const checksumSha256 = createHash("sha256").update(input.buffer).digest("hex")
     const storedFileName = `${randomUUID()}.${input.extension}`
-    const innerPath = buildDocumentRelativePath(input.tenantId, input.folder, storedFileName)
-    const relativePath =
-      pdfPrefix && pdfPrefix.length > 0 ? `${pdfPrefix.replace(/\/+$/, "")}/${innerPath}` : innerPath
+    const relativePath = buildDocumentRelativePath(input.tenantId, input.folder, storedFileName, pdfPrefix)
     assertSafeRelativePath(relativePath)
     await storage.saveFile({
       relativePath,

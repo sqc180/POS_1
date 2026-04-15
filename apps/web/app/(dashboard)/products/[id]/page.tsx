@@ -24,6 +24,7 @@ import {
   SelectValue,
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
@@ -656,6 +657,7 @@ export default function ProductDetailPage() {
         <SheetContent className="sm:max-w-md">
           <SheetHeader>
             <SheetTitle>Add variant</SheetTitle>
+            <SheetDescription>Create an additional SKU for this product (label and unique SKU).</SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 py-6">
             <div className="grid gap-2">
