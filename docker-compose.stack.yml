@@ -1,0 +1,52 @@
+# API + Next.js only (MongoDB = Atlas or any external URI).
+# Compose loads variables from a `.env` file in this directory if present.
+#
+# Required in .env (or export before `up`):
+#   MONGODB_URI, JWT_SECRET, CORS_ALLOWED_ORIGINS (comma-separated origins, e.g. https://app.example.com)
+#   NEXT_PUBLIC_API_BASE_URL — full URL the browser uses to reach the API (same host:port or public API URL)
+#
+# Example:
+#   docker compose -f docker-compose.stack.yml up --build -d
+#
+# Optional: API_PUBLISH_PORT / WEB_PUBLISH_PORT to map host ports (defaults 4000 / 3000).
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    ports:
+      - "${API_PUBLISH_PORT:-4000}:4000"
+    environment:
+      NODE_ENV: production
+      APP_ENV: ${APP_ENV:-production}
+      HOST: 0.0.0.0
+      PORT: 4000
+      MONGODB_URI: ${MONGODB_URI:?Set MONGODB_URI (e.g. Atlas connection string)}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET (min 16 characters)}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?Set CORS_ALLOWED_ORIGINS to your web origin(s)}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      STORAGE_PROVIDER: local
+      STORAGE_ROOT_PATH: /data/storage
+      TRUST_PROXY: "true"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - pos_api_storage:/data/storage
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?Set NEXT_PUBLIC_API_BASE_URL (public API URL)}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-POS ERP}
+        NEXT_PUBLIC_ENV_NAME: ${NEXT_PUBLIC_ENV_NAME:-production}
+    restart: unless-stopped
+    ports:
+      - "${WEB_PUBLISH_PORT:-3000}:3000"
+    depends_on:
+      - api
+
+volumes:
+  pos_api_storage:

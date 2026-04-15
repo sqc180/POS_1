@@ -1,0 +1,33 @@
+# Blueprint for Render.com — deploy API from monorepo root.
+# Dashboard: New → Blueprint → connect repo, or create Web Service manually with same commands.
+#
+# After deploy: set CORS_ALLOWED_ORIGINS to your Vercel URL (https://….vercel.app).
+# Atlas Network Access: allow Render egress (often simplest: 0.0.0.0/0 for non-prod).
+
+services:
+  - type: web
+    name: pos-api
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: .
+    buildCommand: corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install --frozen-lockfile && pnpm exec turbo run build --filter=@repo/api
+    startCommand: node apps/api/dist/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: "true"
+      - key: LOG_LEVEL
+        value: info
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false

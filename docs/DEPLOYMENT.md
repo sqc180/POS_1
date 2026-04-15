@@ -82,6 +82,8 @@ docker build -f Dockerfile.web -t pos-web:local \
 docker compose --profile full up --build
 ```
 
+The API service uses **`COMPOSE_MONGODB_URI`** (default **`mongodb://mongo:27017/pos_erp_dev`**) so it talks to the **`mongo` container** on the Docker network. Your host **`.env`** value **`MONGODB_URI=127.0.0.1…`** is for **`pnpm dev`** only and is not passed into the container for this profile.
+
 Override secrets via environment or an env file; see `docker-compose.yml`.
 
 ## Local development
@@ -104,6 +106,29 @@ Suggested order (see root `package.json` **`ci`** script):
 5. Build (`pnpm build`)
 
 Optional: build Docker images, deploy to staging, run smoke checks against `/health` and `/ready`, then promote to production with manual approval.
+
+## Docker stack (API + web, external MongoDB)
+
+For **Atlas** (or any remote MongoDB), use **`docker-compose.stack.yml`**: it runs **only** `api` and `web` (no bundled `mongo` service).
+
+1. In the repo root, ensure `.env` (or exported shell variables) defines at least:
+   - `MONGODB_URI`, `JWT_SECRET`, `CORS_ALLOWED_ORIGINS` (must include the browser origin of the Next app, e.g. `https://app.example.com` or `http://YOUR_SERVER_IP:3000`)
+   - `NEXT_PUBLIC_API_BASE_URL` — full URL the **browser** uses to call the API (e.g. `http://YOUR_SERVER_IP:4000` or `https://api.example.com`)
+2. Run:
+
+```bash
+docker compose -f docker-compose.stack.yml up --build -d
+```
+
+3. Smoke: `curl -sS http://localhost:4000/health` and open `http://localhost:3000` (or mapped ports via `API_PUBLISH_PORT` / `WEB_PUBLISH_PORT`).
+
+## GitHub Container Registry (GHCR)
+
+Workflow [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) builds **`Dockerfile.api`** and **`Dockerfile.web`** and pushes to **`ghcr.io/<owner>/<repo>-api`** and **`-web`** (repository name lowercased).
+
+1. GitHub → **Settings** → **Actions** → **General** → **Workflow permissions** → enable **Read and write** (needed for `GITHUB_TOKEN` to push packages).
+2. **Actions** → **Docker publish** → **Run workflow** → set **Public API base URL** to the real API URL users will call from the browser (this is compiled into the web image).
+3. After the run, make each package **public** (optional) under **Packages**, or stay private and `docker login ghcr.io` on the server.
 
 ## GitLab CI / Jenkins
 
