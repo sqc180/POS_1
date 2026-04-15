@@ -26,16 +26,21 @@ import {
 
 export type NavItemLike = { id: string; label: string; href: string }
 
-export const groupNavForShell = (nav: NavItemLike[]) => {
-  const defs = [
-    { key: "overview", label: "Overview", ids: ["dashboard", "documents"] },
-    { key: "sales", label: "Sales & payments", ids: ["pos", "billing", "payments", "receipts", "refunds"] },
-    { key: "catalog", label: "Catalog & inventory", ids: ["products", "categories", "branches", "inventory", "stock"] },
-    { key: "partners", label: "Customers & suppliers", ids: ["customers", "suppliers"] },
-    { key: "tax", label: "Tax", ids: ["gst"] },
-    { key: "team", label: "Team & access", ids: ["users", "roles"] },
-    { key: "system", label: "Settings & system", ids: ["settings", "audit", "gateway", "guide"] },
-  ] as const
+export type NavGroupDefLike = { key: string; label: string; ids: readonly string[] }
+
+const defaultShellGroupDefs: readonly NavGroupDefLike[] = [
+  { key: "overview", label: "Overview", ids: ["dashboard", "documents"] },
+  { key: "sales", label: "Sales & payments", ids: ["pos", "billing", "payments", "receipts", "refunds"] },
+  { key: "catalog", label: "Catalog & inventory", ids: ["products", "categories", "branches", "inventory", "stock"] },
+  { key: "partners", label: "Customers & suppliers", ids: ["customers", "suppliers"] },
+  { key: "tax", label: "Tax", ids: ["gst"] },
+  { key: "team", label: "Team & access", ids: ["users", "roles"] },
+  { key: "system", label: "Settings & system", ids: ["settings", "audit", "gateway", "guide"] },
+] as const
+
+/** Group sidebar nav; when `groupDefs` is omitted, uses the legacy default layout (matches core retail). */
+export const groupNavForShell = (nav: NavItemLike[], groupDefs?: readonly NavGroupDefLike[]) => {
+  const defs = groupDefs ?? defaultShellGroupDefs
 
   const byId = new Map(nav.map((i) => [i.id, i]))
   const used = new Set<string>()

@@ -41,7 +41,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     : [...baseNav, { id: "guide", label: "Guide & samples", href: "/settings/guide" }]
 
   return (
-    <AppShell nav={nav} businessLabel={me.tenant.name} businessType={me.tenant.businessType}>
+    <AppShell
+      nav={nav}
+      businessLabel={me.tenant.name}
+      portalTheme={me.tenant.portalTheme}
+      portalExperienceId={me.tenant.portalExperienceId}
+      navGroupDefs={me.navGroups}
+    >
       <div className="flex w-full flex-col gap-6">
         <ModuleHintBanner />
         {children}

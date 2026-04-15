@@ -1,10 +1,14 @@
 import mongoose from "mongoose"
 import type { ApiEnv } from "@repo/config"
 import {
+  applyNavPresentation,
   filterPermissionsByBusinessType,
   getFeatureMap,
   getMenuForRole,
+  getPortalPageCopy,
+  getPortalTheme,
   resolveActiveBusinessType,
+  resolvePortalExperienceId,
 } from "@repo/business-type-engine"
 import { canCreateUserOrSetPassword, permissionsForRole } from "@repo/permissions"
 import type { BusinessTypeId, UserPublic, UserRole, UserStatus } from "@repo/types"
@@ -341,7 +345,7 @@ export const meService = {
     const businessType = resolveActiveBusinessType(String(tenant.businessType)) as BusinessTypeId
     const rawPerms = [...permissionsForRole(role)]
     const permissions = filterPermissionsByBusinessType(businessType, rawPerms)
-    const menu = getMenuForRole(businessType, role)
+    const baseMenu = getMenuForRole(businessType, role)
     const features = getFeatureMap(businessType)
     const [userRow] = await attachBranchCodes(tenantId, [toPublic(user)])
     const pilotRaw = (tenant as { pilotVertical?: string | null }).pilotVertical ?? null
@@ -365,6 +369,7 @@ export const meService = {
     let contextBranchCode: string | null | undefined
     let branchBehaviorHints: typeof behaviorHints | undefined
     let branchProductFieldHints: { key: string; visible: boolean; section: string }[] | undefined
+    let branchVerticalSlug: string | null | undefined
     if (code) {
       const br = await BranchModel.findOne({
         tenantId: new mongoose.Types.ObjectId(tenantId),
@@ -372,6 +377,7 @@ export const meService = {
       }).lean()
       if (br) {
         const slug = String((br as { businessTypeSlug?: string }).businessTypeSlug ?? "").trim() || null
+        branchVerticalSlug = slug || undefined
         const packIds = ((br as { enabledPackIds?: string[] }).enabledPackIds ?? []).filter(Boolean)
         const branchRules = resolveRulesForTenantAndBranchDoc(tenantLean, {
           businessTypeSlug: slug || undefined,
@@ -399,6 +405,14 @@ export const meService = {
       visible: h.visible,
       section: h.section,
     }))
+    const portalExperienceId = resolvePortalExperienceId({
+      businessType,
+      pilotVertical: pilotRaw,
+      branchBusinessTypeSlug: branchVerticalSlug,
+    })
+    const { menu, navGroups } = applyNavPresentation(portalExperienceId, baseMenu)
+    const portalTheme = getPortalTheme(portalExperienceId)
+    const portalPageCopy = getPortalPageCopy(portalExperienceId)
     return {
       user: userRow!,
       tenant: {
@@ -409,12 +423,16 @@ export const meService = {
         enabledPackIds: tenantPackIds,
         capabilities,
         behaviorHints,
+        portalExperienceId,
+        portalTheme,
         status: tenant.status,
         createdAt: tenant.createdAt?.toISOString?.() ?? "",
         updatedAt: tenant.updatedAt?.toISOString?.() ?? "",
       },
       permissions,
       menu,
+      navGroups: navGroups.map((g) => ({ key: g.key, label: g.label, ids: [...g.ids] })),
+      portalPageCopy,
       features: Object.fromEntries(Object.entries(features).map(([k, v]) => [k, v])) as Record<string, boolean>,
       productFieldHints,
       ...(branchCapabilities !== undefined ? { branchCapabilities } : {}),

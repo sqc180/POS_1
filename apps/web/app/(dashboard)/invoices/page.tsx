@@ -20,6 +20,7 @@ import {
 } from "@repo/ui"
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
+import { usePortalCopy } from "@/hooks/use-portal-copy"
 import { apiRequest } from "@/lib/api"
 import { notifyError } from "@/lib/notify"
 
@@ -70,6 +71,7 @@ const InvoiceListTableSkeleton = () => (
 )
 
 export default function InvoicesPage() {
+  const portalCopy = usePortalCopy()
   const [rows, setRows] = useState<InvoiceListRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -96,11 +98,11 @@ export default function InvoicesPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Invoices</h1>
+          <h1 className="text-2xl font-semibold">{portalCopy.billingScreenTitle}</h1>
           <p className="text-sm text-muted-foreground">Draft and completed sales with PDF export on detail.</p>
         </div>
         <Button asChild>
-          <Link href="/pos">Open POS</Link>
+          <Link href="/pos">Open {portalCopy.posScreenTitle}</Link>
         </Button>
       </div>
 

@@ -8,6 +8,21 @@ export {
   resolveActiveBusinessType,
 } from "./future-registry"
 
+export {
+  applyNavPresentation,
+  getPortalExperienceConfig,
+  getPortalNavGroupDefs,
+  getPortalPageCopy,
+  getPortalTheme,
+  resolvePortalExperienceId,
+  type PortalExperienceConfig,
+  type PortalExperienceId,
+  type PortalNavGroupDef,
+  type PortalPageCopyDTO,
+  type PortalThemeDTO,
+  type ResolvePortalExperienceInput,
+} from "./portal-experience"
+
 export { VerticalCapability } from "./vertical-capability-codes"
 
 export {

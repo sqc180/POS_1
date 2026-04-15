@@ -64,6 +64,29 @@ export interface TenantBehaviorHintsDTO {
   dashboardAccent?: string | null
 }
 
+/** Full-shell background theming from `portalExperienceId` (public asset paths). */
+export interface PortalThemeDTO {
+  backgroundImageLight: string
+  backgroundImageDark: string
+  overlayClassName: string
+  /** Mirrors capability pack `uiRules.dashboardAccent` when experience maps to a pack. */
+  dashboardAccent?: string | null
+}
+
+/** Sidebar section config from server (matches business-type-engine portal groups). */
+export interface PortalNavGroupDTO {
+  key: string
+  label: string
+  ids: string[]
+}
+
+/** Page chrome titles for POS / billing / receipts screens. */
+export interface PortalPageCopyDTO {
+  posScreenTitle: string
+  billingScreenTitle: string
+  receiptsScreenTitle: string
+}
+
 export interface TenantDTO {
   id: string
   name: string
@@ -77,6 +100,9 @@ export interface TenantDTO {
   capabilities: string[]
   /** Resolved UI/service hints — prefer over raw businessType for industry shells. */
   behaviorHints?: TenantBehaviorHintsDTO
+  /** Shell identity: `core_retail`, `core_supermart`, or a pilot vertical slug. */
+  portalExperienceId: string
+  portalTheme: PortalThemeDTO
   createdAt: string
   updatedAt: string
 }
@@ -93,6 +119,10 @@ export interface MeResponse {
   tenant: TenantDTO
   permissions: string[]
   menu: NavItemDTO[]
+  /** Sidebar grouping for the signed-in portal experience (server-resolved). */
+  navGroups: PortalNavGroupDTO[]
+  /** Page titles for key commerce routes (aligned with menu terminology). */
+  portalPageCopy: PortalPageCopyDTO
   features: Record<string, boolean>
   /** Declarative product field visibility from resolved capabilities (tenant scope). */
   productFieldHints?: ProductFieldHintDTO[]

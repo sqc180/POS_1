@@ -108,6 +108,38 @@
   --accent: 205 22% 16%;
 }
 
+/* Portal pilot / pack shells: subtle chrome shift (see `portalTheme.dashboardAccent` + `data-experience` on <html>). */
+:root[data-experience="restaurant"] {
+  --ring: 20 48% 38%;
+  --accent: 32 36% 92%;
+}
+.dark[data-experience="restaurant"] {
+  --ring: 32 62% 58%;
+  --accent: 24 14% 18%;
+}
+:root[data-experience="pharmacy"],
+:root[data-experience="medical_store"] {
+  --ring: 214 48% 38%;
+}
+.dark[data-experience="pharmacy"],
+.dark[data-experience="medical_store"] {
+  --ring: 214 45% 62%;
+}
+:root[data-experience="grocery"] {
+  --ring: 142 40% 34%;
+}
+.dark[data-experience="grocery"] {
+  --ring: 142 38% 48%;
+}
+:root[data-experience="wholesale"],
+:root[data-experience="distribution"] {
+  --ring: 221 48% 36%;
+}
+.dark[data-experience="wholesale"],
+.dark[data-experience="distribution"] {
+  --ring: 218 42% 58%;
+}
+
 body {
   @apply tracking-tight;
   font-feature-settings: "kern" 1, "liga" 1;

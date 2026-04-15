@@ -12,6 +12,7 @@
   "scripts": {
     "build": "node -e \"process.exit(0)\"",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "node -e \"process.exit(0)\""
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "@repo/types": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.3"
   }
 }

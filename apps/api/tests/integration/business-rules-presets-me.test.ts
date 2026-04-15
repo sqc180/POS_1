@@ -175,3 +175,61 @@ describe("business rules: presets after grocery pilot", () => {
     expect(res.statusCode).toBe(201)
   })
 })
+
+describe("portal experience: /me after restaurant pilot", () => {
+  let ctx: Awaited<ReturnType<typeof openTestApp>>
+  let token: string
+
+  beforeAll(async () => {
+    ctx = await openTestApp()
+    const o = await onboardRetailTenant(ctx.app, {
+      ownerEmail: "portal-restaurant@qa.test",
+      ownerPassword: "pass123456",
+    })
+    token = o.token
+    const patch = await injectJson(ctx.app, "PATCH", "/settings/pilot-vertical", {
+      headers: authBearer(token),
+      payload: { pilotVertical: "restaurant" },
+    })
+    expect(patch.statusCode).toBe(200)
+  })
+
+  afterAll(async () => {
+    await ctx.close()
+  })
+
+  it("GET /me includes portal fields, nav groups, themed menu labels, and page copy", async () => {
+    const me = await injectJson(ctx.app, "GET", "/me", { headers: authBearer(token) })
+    expect(me.statusCode).toBe(200)
+    const body = parseJson<{
+      success: true
+      data: {
+        tenant: {
+          portalExperienceId: string
+          portalTheme: {
+            backgroundImageLight: string
+            backgroundImageDark: string
+            overlayClassName: string
+            dashboardAccent?: string | null
+          }
+        }
+        navGroups: { key: string; label: string; ids: string[] }[]
+        menu: { id: string; label: string }[]
+        portalPageCopy: { posScreenTitle: string; billingScreenTitle: string; receiptsScreenTitle: string }
+      }
+    }>(me.body)
+    expect(body.data.tenant.portalExperienceId).toBe("restaurant")
+    expect(body.data.tenant.portalTheme.backgroundImageLight).toContain("/portal/restaurant/")
+    expect(body.data.tenant.portalTheme.overlayClassName.length).toBeGreaterThan(0)
+    expect(body.data.tenant.portalTheme.dashboardAccent).toBe("restaurant")
+    const pos = body.data.menu.find((m) => m.id === "pos")
+    expect(pos?.label).toBe("Table POS")
+    const billing = body.data.menu.find((m) => m.id === "billing")
+    expect(billing?.label).toBe("Checks & invoices")
+    const sales = body.data.navGroups.find((g) => g.key === "sales")
+    expect(sales?.label).toBe("Front of house")
+    expect(body.data.portalPageCopy.billingScreenTitle).toBe("Checks & invoices")
+    expect(body.data.portalPageCopy.receiptsScreenTitle).toBe("Payment slips")
+    expect(body.data.portalPageCopy.posScreenTitle).toBe("Table POS")
+  })
+})

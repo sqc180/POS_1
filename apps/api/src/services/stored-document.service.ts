@@ -49,7 +49,7 @@ export const createStoredDocumentService = (
   storage: StorageProvider,
   opts: StoredDocumentServiceOptions = {},
 ) => {
-  const pdfPrefix = opts.pdfPathPrefix?.trim() || undefined
+  void opts.pdfPathPrefix
   const persistNewAsset = async (input: {
     tenantId: string
     actorId: string
@@ -66,7 +66,7 @@ export const createStoredDocumentService = (
   }): Promise<FileAssetDoc> => {
     const checksumSha256 = createHash("sha256").update(input.buffer).digest("hex")
     const storedFileName = `${randomUUID()}.${input.extension}`
-    const relativePath = buildDocumentRelativePath(input.tenantId, input.folder, storedFileName, pdfPrefix)
+    const relativePath = buildDocumentRelativePath(input.tenantId, input.folder, storedFileName)
     assertSafeRelativePath(relativePath)
     await storage.saveFile({
       relativePath,

@@ -42,6 +42,7 @@ import {
 import Image from "next/image"
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
+import { usePortalCopy } from "@/hooks/use-portal-copy"
 import { apiRequest } from "@/lib/api"
 import { branchLabelMap, formatBranchLabel } from "@/lib/branch-label"
 import { notifyError } from "@/lib/notify"
@@ -132,6 +133,7 @@ const isTrackedInsufficientLine = (
   l.stock.tracked && !l.stock.sufficient
 
 export default function PosPage() {
+  const portalCopy = usePortalCopy()
   const [q, setQ] = useState("")
   const [hits, setHits] = useState<ProductRow[]>([])
   const [cart, setCart] = useState<CartLine[]>([])
@@ -548,7 +550,7 @@ export default function PosPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">POS</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{portalCopy.posScreenTitle}</h1>
           <p className="text-sm text-muted-foreground">
             Save a draft, then complete the sale. Payments (cash, card, UPI QR, or Razorpay Checkout) finalize the invoice if it is still a draft. Razorpay is verified on the server; webhooks reconcile the source of truth.
           </p>
@@ -558,7 +560,7 @@ export default function PosPage() {
             New sale
           </Button>
           <Button type="button" variant="secondary" asChild>
-            <Link href="/invoices">Invoices</Link>
+            <Link href="/invoices">{portalCopy.billingScreenTitle}</Link>
           </Button>
         </div>
       </div>

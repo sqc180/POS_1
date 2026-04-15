@@ -18,6 +18,7 @@ import {
 } from "@repo/ui"
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
+import { usePortalCopy } from "@/hooks/use-portal-copy"
 import { apiBlob, apiRequest } from "@/lib/api"
 import { notifyError } from "@/lib/notify"
 
@@ -36,6 +37,7 @@ const formatReceiptDate = (iso: string): string => {
 }
 
 export default function ReceiptsPage() {
+  const portalCopy = usePortalCopy()
   const [rows, setRows] = useState<ReceiptRow[]>([])
   const [pdfError, setPdfError] = useState("")
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -71,7 +73,7 @@ export default function ReceiptsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Receipts</h1>
+        <h1 className="text-2xl font-semibold">{portalCopy.receiptsScreenTitle}</h1>
         <p className="text-sm text-muted-foreground">Issued when an invoice is fully paid.</p>
       </div>
       <Alert>

@@ -8,8 +8,9 @@
     "dev": "pnpm exec turbo run dev",
     "lint": "pnpm exec turbo run lint",
     "typecheck": "pnpm exec turbo run typecheck",
-    "test": "pnpm run test:api",
+    "test": "pnpm run test:api && pnpm run test:business-type-engine",
     "test:api": "pnpm --filter @repo/api test",
+    "test:business-type-engine": "pnpm --filter @repo/business-type-engine test",
     "ci": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "devDependencies": {

@@ -28,8 +28,10 @@ import {
   TooltipTrigger,
 } from "@repo/ui"
 import { cn } from "@repo/ui"
+import type { PortalNavGroupDTO, PortalThemeDTO } from "@repo/types"
 import { ChevronDown, ChevronLeft, ChevronRight, Menu } from "lucide-react"
 import Link from "next/link"
+import { useTheme } from "next-themes"
 import { usePathname } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react"
 import { useAuth } from "@/components/auth-provider"
@@ -40,9 +42,16 @@ import {
   navIconForId,
   type NavItemLike,
   workspaceInitials,
+  type NavGroupDefLike,
 } from "@/lib/nav-shell-groups"
 
 const SIDEBAR_COLLAPSED_KEY = "pos-erp-sidebar-collapsed"
+
+const workspaceModeLabel = (portalExperienceId: string): string => {
+  if (portalExperienceId === "core_retail") return "Retail"
+  if (portalExperienceId === "core_supermart") return "Supermart"
+  return portalExperienceId.replace(/_/g, " ")
+}
 
 export type ShellNavItem = { id: string; label: string; href: string }
 
@@ -161,20 +170,38 @@ export const AppShell = ({
   nav,
   children,
   businessLabel,
-  businessType,
+  portalTheme,
+  portalExperienceId,
+  navGroupDefs,
 }: {
   nav: ShellNavItem[]
   children: ReactNode
   businessLabel: string
-  businessType?: string
+  portalTheme: PortalThemeDTO
+  portalExperienceId: string
+  navGroupDefs: readonly PortalNavGroupDTO[]
 }) => {
   const pathname = usePathname()
   const { me, logout } = useAuth()
+  const { resolvedTheme } = useTheme()
   const [sheetOpen, setSheetOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
+  const [themeMounted, setThemeMounted] = useState(false)
 
-  const grouped = useMemo(() => groupNavForShell(nav), [nav])
+  const shellGroupDefs = useMemo(
+    (): readonly NavGroupDefLike[] => navGroupDefs.map((g) => ({ key: g.key, label: g.label, ids: g.ids })),
+    [navGroupDefs],
+  )
+
+  const grouped = useMemo(() => groupNavForShell(nav, shellGroupDefs), [nav, shellGroupDefs])
+
+  useEffect(() => {
+    setThemeMounted(true)
+  }, [])
+
+  const portalBackdropUrl =
+    themeMounted && resolvedTheme === "dark" ? portalTheme.backgroundImageDark : portalTheme.backgroundImageLight
 
   useEffect(() => {
     try {
@@ -218,12 +245,19 @@ export const AppShell = ({
     }
   }, [me?.tenant.businessType])
 
+  useEffect(() => {
+    document.documentElement.setAttribute("data-experience", portalExperienceId)
+    return () => {
+      document.documentElement.removeAttribute("data-experience")
+    }
+  }, [portalExperienceId])
+
   const DIRECTORY_HREFS = ["/categories", "/branches", "/suppliers", "/customers"] as const
   const directoryNav = DIRECTORY_HREFS.map((href) => nav.find((item) => item.href === href)).filter(
     (item): item is ShellNavItem => Boolean(item),
   )
 
-  const typeLabel = businessType === "supermart" ? "Supermart" : businessType === "retail" ? "Retail" : null
+  const modeLabel = workspaceModeLabel(portalExperienceId)
   const initials = useMemo(() => workspaceInitials(businessLabel), [businessLabel])
 
   const toggleCollapsed = useCallback(() => {
@@ -232,7 +266,15 @@ export const AppShell = ({
 
   return (
     <TooltipProvider delayDuration={200}>
-    <div className="flex min-h-screen w-full bg-muted/40 dark:bg-muted/25">
+    <div className="relative flex min-h-screen w-full">
+      <div className="pointer-events-none fixed inset-0 z-0" aria-hidden>
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: `url(${portalBackdropUrl})` }}
+        />
+        <div className={cn("absolute inset-0", portalTheme.overlayClassName)} />
+      </div>
+      <div className="relative z-[1] flex min-h-screen w-full bg-muted/30 dark:bg-muted/20">
       <aside
         className={cn(
           "sticky top-0 hidden h-dvh max-h-dvh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-shell transition-[width] duration-200 ease-out lg:flex",
@@ -269,14 +311,12 @@ export const AppShell = ({
                 <div className="text-sm font-semibold leading-snug tracking-tight text-sidebar-foreground">
                   {businessLabel}
                 </div>
-                {typeLabel ? (
-                  <Badge
-                    variant="outline"
-                    className="w-fit border-sidebar-border/70 bg-sidebar-accent/30 text-[0.65rem] font-medium capitalize text-sidebar-foreground"
-                  >
-                    {typeLabel}
-                  </Badge>
-                ) : null}
+                <Badge
+                  variant="outline"
+                  className="w-fit border-sidebar-border/70 bg-sidebar-accent/30 text-[0.65rem] font-medium capitalize text-sidebar-foreground"
+                >
+                  {modeLabel}
+                </Badge>
               </div>
               <Button
                 type="button"
@@ -324,14 +364,12 @@ export const AppShell = ({
                   Workspace
                 </p>
                 <div className="mt-1 text-sm font-semibold text-sidebar-foreground">{businessLabel}</div>
-                {typeLabel ? (
-                  <Badge
-                    variant="outline"
-                    className="mt-2 w-fit border-sidebar-border/70 bg-sidebar-accent/30 text-[0.65rem] capitalize text-sidebar-foreground"
-                  >
-                    {typeLabel}
-                  </Badge>
-                ) : null}
+                <Badge
+                  variant="outline"
+                  className="mt-2 w-fit border-sidebar-border/70 bg-sidebar-accent/30 text-[0.65rem] capitalize text-sidebar-foreground"
+                >
+                  {modeLabel}
+                </Badge>
               </div>
               <ScrollArea className="max-h-[calc(100dvh-8rem)]">
                 <GroupedNav
@@ -397,9 +435,10 @@ export const AppShell = ({
             </div>
           </div>
         </header>
-        <main className="relative flex-1 bg-gradient-to-b from-background via-background to-accent/35 p-4 sm:p-6 lg:p-8">
+        <main className="relative flex-1 bg-gradient-to-b from-background/40 via-background/55 to-background/70 p-4 backdrop-blur-[2px] sm:p-6 lg:p-8 dark:from-background/50 dark:via-background/65 dark:to-background/80">
           <div className="mx-auto w-full max-w-content">{children}</div>
         </main>
+      </div>
       </div>
     </div>
     </TooltipProvider>
