@@ -165,6 +165,8 @@ export interface DashboardSummaryDTO {
   draftInvoices: number
   completedInvoices: number
   pendingRefunds: number
+  /** Active batches expiring within 60 days (0 when none). */
+  batchesNearExpiry: number
 }
 
 export interface ApiSuccess<T> {

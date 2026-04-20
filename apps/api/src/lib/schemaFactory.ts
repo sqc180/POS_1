@@ -34,6 +34,7 @@ const productBodyBaseSchema = z.object({
   mrp: z.number().nonnegative().optional(),
   trackStock: z.boolean().optional(),
   brand: z.string().optional(),
+  genericName: z.string().max(256).optional(),
   unit: z.string().optional(),
   imageUrl: z.string().optional(),
   variantMode: z.enum(["none", "optional", "required"]).optional(),

@@ -35,10 +35,12 @@ describe("dashboard summary", () => {
         draftInvoices: number
         completedInvoices: number
         pendingRefunds: number
+        batchesNearExpiry: number
       }
     }>(res.body)
     expect(b.success).toBe(true)
     expect(typeof b.data.productsActive).toBe("number")
+    expect(typeof b.data.batchesNearExpiry).toBe("number")
     expect(typeof b.data.branchesActive).toBe("number")
     expect(typeof b.data.draftInvoices).toBe("number")
     expect(b.data.productsActive).toBeGreaterThanOrEqual(0)

@@ -8,6 +8,22 @@ const invStockKey = (productId: string, variantId?: string): string =>
   variantId ? `${productId}:${variantId}` : `${productId}:`
 
 export const posService = {
+  /**
+   * Product IDs with positive stock at branch (base inventory rows only — no variant split).
+   */
+  async listInStockProductIds(tenantId: string, branchId: string): Promise<string[]> {
+    const tenantOid = new mongoose.Types.ObjectId(tenantId)
+    const rows = await InventoryItemModel.find({
+      tenantId: tenantOid,
+      branchId,
+      $or: [{ variantId: null }, { variantId: { $exists: false } }],
+      currentStock: { $gt: 0 },
+    })
+      .select({ productId: 1 })
+      .lean()
+    return [...new Set(rows.map((r) => (r as { productId: mongoose.Types.ObjectId }).productId.toString()))]
+  },
+
   async previewTotals(tenantId: string, lines: LineInput[]) {
     const { lines: built } = await taxService.buildLinesFromProducts(tenantId, lines)
     const sums = taxService.summarize(built)

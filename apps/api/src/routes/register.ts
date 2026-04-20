@@ -49,6 +49,8 @@ import { razorpayPosService } from "../services/razorpay-pos.service.js"
 import { razorpayWebhookService } from "../services/razorpay-webhook.service.js"
 import { receiptService } from "../services/receipt.service.js"
 import { refundService } from "../services/refund.service.js"
+import { unavailableMedicineService } from "../services/unavailable-medicine.service.js"
+import { procurementService } from "../services/procurement.service.js"
 import { auditService } from "../services/audit.service.js"
 import { dashboardSummaryService } from "../services/dashboard-summary.service.js"
 
@@ -1146,6 +1148,14 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
       }
     })
 
+    app.get("/pos/in-stock-product-ids", { preHandler: [requirePermission(Permission.pos)] }, async (request, reply) => {
+      const auth = request.auth!
+      const settings = await businessSettingsService.get(auth.tenantId)
+      const branchId = settings?.defaultBranchId ?? "main"
+      const productIds = await posService.listInStockProductIds(auth.tenantId, branchId)
+      return reply.send({ success: true, data: { productIds } })
+    })
+
     app.get("/invoices", { preHandler: [requirePermission(Permission.billing)] }, async (request, reply) => {
       const auth = request.auth!
       const status = (request.query as { status?: string }).status
@@ -1483,6 +1493,9 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
           paymentId: z.string().optional(),
           amount: z.number().positive(),
           reason: z.string().optional(),
+          returnLines: z
+            .array(z.object({ lineIndex: z.number().int().min(0), qty: z.number().positive() }))
+            .optional(),
         })
         .safeParse(request.body)
       if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
@@ -1535,6 +1548,117 @@ export const registerRoutes = async (app: FastifyInstance, env: ApiEnv) => {
           .header("X-File-Asset-Id", asset.id)
           .header("Content-Disposition", `attachment; filename="${asset.originalFileName}"`)
           .send(buffer)
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
+    app.get("/pharmacy/unavailable-medicines", { preHandler: [requirePermission(Permission.pos)] }, async (request, reply) => {
+      const auth = request.auth!
+      const status = (request.query as { status?: string }).status
+      const data = await unavailableMedicineService.list(auth.tenantId, status)
+      return reply.send({ success: true, data })
+    })
+
+    app.post("/pharmacy/unavailable-medicines", { preHandler: [requirePermission(Permission.pos)] }, async (request, reply) => {
+      const auth = request.auth!
+      const parsed = z
+        .object({
+          branchId: z.string().optional(),
+          productId: z.string().optional(),
+          requestedName: z.string().optional(),
+          note: z.string().optional(),
+        })
+        .safeParse(request.body)
+      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+      try {
+        const data = await unavailableMedicineService.create(auth.tenantId, auth.userId, parsed.data)
+        return reply.status(201).send({ success: true, data })
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
+    app.get("/procurement/purchase-requisitions", { preHandler: [requirePermission(Permission.inventory)] }, async (request, reply) => {
+      const auth = request.auth!
+      const data = await procurementService.listRequisitions(auth.tenantId)
+      return reply.send({ success: true, data })
+    })
+
+    app.post("/procurement/purchase-requisitions", { preHandler: [requirePermission(Permission.inventory)] }, async (request, reply) => {
+      const auth = request.auth!
+      const parsed = z
+        .object({
+          branchId: z.string().optional(),
+          title: z.string().optional(),
+          lines: z.array(z.object({ productId: z.string(), qty: z.number().positive(), note: z.string().optional() })).min(1),
+        })
+        .safeParse(request.body)
+      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+      try {
+        const data = await procurementService.createRequisition(auth.tenantId, auth.userId, parsed.data)
+        return reply.status(201).send({ success: true, data })
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
+    app.get("/procurement/grn-drafts", { preHandler: [requirePermission(Permission.inventory)] }, async (request, reply) => {
+      const auth = request.auth!
+      const data = await procurementService.listGrnDrafts(auth.tenantId)
+      return reply.send({ success: true, data })
+    })
+
+    app.post("/procurement/grn-drafts", { preHandler: [requirePermission(Permission.inventory)] }, async (request, reply) => {
+      const auth = request.auth!
+      const parsed = z
+        .object({
+          branchId: z.string().optional(),
+          supplierId: z.string().optional(),
+          lines: z
+            .array(
+              z.object({
+                productId: z.string(),
+                qty: z.number().positive(),
+                batchCode: z.string().optional(),
+                expiryDate: z.string().nullable().optional(),
+              }),
+            )
+            .min(1),
+        })
+        .safeParse(request.body)
+      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+      try {
+        const data = await procurementService.createGrnDraft(auth.tenantId, auth.userId, parsed.data)
+        return reply.status(201).send({ success: true, data })
+      } catch (e: unknown) {
+        const status = (e as Error & { statusCode?: number }).statusCode ?? 400
+        return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")
+      }
+    })
+
+    app.get("/procurement/stock-transfers", { preHandler: [requirePermission(Permission.stock)] }, async (request, reply) => {
+      const auth = request.auth!
+      const data = await procurementService.listStockTransfers(auth.tenantId)
+      return reply.send({ success: true, data })
+    })
+
+    app.post("/procurement/stock-transfers", { preHandler: [requirePermission(Permission.stock)] }, async (request, reply) => {
+      const auth = request.auth!
+      const parsed = z
+        .object({
+          fromBranchId: z.string().min(1),
+          toBranchId: z.string().min(1),
+          lines: z.array(z.object({ productId: z.string(), variantId: z.string().optional(), qty: z.number().positive() })).min(1),
+        })
+        .safeParse(request.body)
+      if (!parsed.success) return sendError(reply, 400, "validation_error", parsed.error.message)
+      try {
+        const data = await procurementService.createStockTransfer(auth.tenantId, auth.userId, parsed.data)
+        return reply.status(201).send({ success: true, data })
       } catch (e: unknown) {
         const status = (e as Error & { statusCode?: number }).statusCode ?? 400
         return sendError(reply, status, "error", e instanceof Error ? e.message : "Failed")

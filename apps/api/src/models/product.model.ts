@@ -16,6 +16,8 @@ const productSchema = new Schema(
     mrp: { type: Number, min: 0 },
     trackStock: { type: Boolean, default: true },
     brand: { type: String, trim: true },
+    /** Pharmacological / generic name for search and dispensing (pharmacy). */
+    genericName: { type: String, trim: true },
     unit: { type: String, trim: true },
     imageUrl: { type: String, trim: true },
     status: { type: String, enum: ["active", "inactive"], default: "active" },
@@ -49,6 +51,7 @@ const productSchema = new Schema(
 productSchema.index({ tenantId: 1, sku: 1 }, { unique: true })
 productSchema.index({ tenantId: 1, barcode: 1 }, { sparse: true })
 productSchema.index({ tenantId: 1, internalCode: 1 }, { sparse: true })
+productSchema.index({ tenantId: 1, genericName: 1 }, { sparse: true })
 
 export type ProductDoc = InferSchemaType<typeof productSchema> & { _id: mongoose.Types.ObjectId }
 export const ProductModel = mongoose.model("Product", productSchema)

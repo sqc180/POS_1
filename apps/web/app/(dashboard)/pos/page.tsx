@@ -10,6 +10,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  Checkbox,
   Command,
   CommandEmpty,
   CommandGroup,
@@ -27,6 +28,12 @@ import {
   PopoverContent,
   PopoverTrigger,
   Separator,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
   Table,
   TableBody,
   TableCell,
@@ -41,7 +48,8 @@ import {
 } from "@repo/ui"
 import Image from "next/image"
 import Link from "next/link"
-import { useCallback, useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { usePortalCopy } from "@/hooks/use-portal-copy"
 import { apiRequest } from "@/lib/api"
 import { branchLabelMap, formatBranchLabel } from "@/lib/branch-label"
@@ -55,6 +63,7 @@ type ProductRow = {
   sellingPrice: number
   status: string
   barcode?: string
+  genericName?: string
   variantMode?: "none" | "optional" | "required"
   batchTracking?: boolean
   serialTracking?: boolean
@@ -134,8 +143,15 @@ const isTrackedInsufficientLine = (
 
 export default function PosPage() {
   const portalCopy = usePortalCopy()
+  const searchParams = useSearchParams()
+  const dispenseMode = searchParams.get("dispense") === "1"
   const [q, setQ] = useState("")
   const [hits, setHits] = useState<ProductRow[]>([])
+  const [inStockOnly, setInStockOnly] = useState(false)
+  const [inStockIds, setInStockIds] = useState<Set<string>>(new Set())
+  const [unavailOpen, setUnavailOpen] = useState(false)
+  const [unavailName, setUnavailName] = useState("")
+  const [unavailNote, setUnavailNote] = useState("")
   const [cart, setCart] = useState<CartLine[]>([])
   const [customerId, setCustomerId] = useState<string | undefined>()
   const [customerLabel, setCustomerLabel] = useState("Walk-in (no customer)")
@@ -196,6 +212,22 @@ export default function PosPage() {
       if (res.success) setBranchLabels(branchLabelMap(res.data))
     })()
   }, [])
+
+  useEffect(() => {
+    if (!dispenseMode || !inStockOnly) {
+      setInStockIds(new Set())
+      return
+    }
+    void (async () => {
+      const res = await apiRequest<{ productIds: string[] }>("/pos/in-stock-product-ids")
+      if (res.success) setInStockIds(new Set(res.data.productIds))
+    })()
+  }, [dispenseMode, inStockOnly])
+
+  const displayHits = useMemo(() => {
+    if (!dispenseMode || !inStockOnly) return hits
+    return hits.filter((p) => inStockIds.has(p.id))
+  }, [hits, dispenseMode, inStockOnly, inStockIds])
 
   const handleAddToCart = (p: ProductRow, variant?: VariantRow) => {
     const line: CartLine = {
@@ -535,6 +567,26 @@ export default function PosPage() {
     setFeedback(`Receipt ${res.data.receiptNumber} issued`)
   }
 
+  const handleLogUnavailable = async () => {
+    const name = unavailName.trim()
+    if (!name) {
+      setFeedback("Enter a medicine name", "destructive")
+      return
+    }
+    const res = await apiRequest<{ id: string }>("/pharmacy/unavailable-medicines", {
+      method: "POST",
+      body: JSON.stringify({ requestedName: name, note: unavailNote.trim() || undefined }),
+    })
+    if (!res.success) {
+      setFeedback(res.error.message, "destructive")
+      return
+    }
+    setUnavailOpen(false)
+    setUnavailName("")
+    setUnavailNote("")
+    setFeedback("Logged unavailable request for purchasing")
+  }
+
   const remaining =
     invoice && (invoice.status === "completed" || invoice.status === "draft")
       ? Math.max(0, Math.round((invoice.grandTotal - invoice.amountPaid) * 100) / 100)
@@ -554,6 +606,23 @@ export default function PosPage() {
           <p className="text-sm text-muted-foreground">
             Save a draft, then complete the sale. Payments (cash, card, UPI QR, or Razorpay Checkout) finalize the invoice if it is still a draft. Razorpay is verified on the server; webhooks reconcile the source of truth.
           </p>
+          {dispenseMode ? (
+            <div className="mt-3 flex flex-col gap-3 rounded-lg border border-border/80 bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="pos-in-stock-only"
+                  checked={inStockOnly}
+                  onCheckedChange={(v) => setInStockOnly(v === true)}
+                />
+                <Label htmlFor="pos-in-stock-only" className="cursor-pointer text-sm font-normal">
+                  Show in-stock products only (this branch)
+                </Label>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => setUnavailOpen(true)}>
+                Log unavailable medicine
+              </Button>
+            </div>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" onClick={handleNewSale}>
@@ -606,10 +675,10 @@ export default function PosPage() {
                   <CommandList>
                     <CommandEmpty>{q.trim() ? "No products found." : "Type to search products."}</CommandEmpty>
                     <CommandGroup heading="Results">
-                      {hits.map((p) => (
+                      {displayHits.map((p) => (
                         <CommandItem
                           key={p.id}
-                          value={`${p.id}-${p.name}-${p.sku}`}
+                          value={`${p.id}-${p.name}-${p.sku}-${p.genericName ?? ""}`}
                           onSelect={() => {
                             void handleChooseProduct(p)
                             setProductOpen(false)
@@ -619,7 +688,8 @@ export default function PosPage() {
                             <span className="font-medium">{p.name}</span>
                             <span className="text-xs text-muted-foreground">
                               {p.sku}
-                              {p.barcode ? ` · ${p.barcode}` : ""} · ₹{p.sellingPrice.toFixed(2)}
+                              {p.barcode ? ` · ${p.barcode}` : ""}
+                              {p.genericName ? ` · Generic: ${p.genericName}` : ""} · ₹{p.sellingPrice.toFixed(2)}
                             </span>
                           </div>
                         </CommandItem>
@@ -969,6 +1039,45 @@ export default function PosPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      <Sheet open={unavailOpen} onOpenChange={setUnavailOpen}>
+        <SheetContent className="sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle>Unavailable medicine</SheetTitle>
+            <SheetDescription>Capture demand when an item is out of stock or not in the catalog.</SheetDescription>
+          </SheetHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="unavail-name">Name</Label>
+              <Input
+                id="unavail-name"
+                value={unavailName}
+                onChange={(e) => setUnavailName(e.target.value)}
+                placeholder="Medicine or generic name"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="unavail-note">Note (optional)</Label>
+              <Textarea
+                id="unavail-note"
+                value={unavailNote}
+                onChange={(e) => setUnavailNote(e.target.value)}
+                rows={2}
+                placeholder="Strength, pack size, patient context…"
+              />
+            </div>
+          </div>
+          <SheetFooter>
+            <Button type="button" variant="outline" onClick={() => setUnavailOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void handleLogUnavailable()}>
+              Save request
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

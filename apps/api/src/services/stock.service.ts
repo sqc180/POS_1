@@ -198,6 +198,56 @@ export const stockService = {
   },
 
   /**
+   * Restores sellable quantity after a validated sale return (refund linked to invoice lines).
+   */
+  async applySaleReturnQty(
+    tenantId: string,
+    actorId: string,
+    productId: string,
+    branchId: string,
+    qty: number,
+    opts?: { variantId?: string; primaryBatchId?: string },
+    referenceId?: string,
+  ) {
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      const err = new Error("Invalid product")
+      ;(err as Error & { statusCode?: number }).statusCode = 400
+      throw err
+    }
+    const tenantOid = new mongoose.Types.ObjectId(tenantId)
+    const productOid = new mongoose.Types.ObjectId(productId)
+    const variantOid =
+      opts?.variantId && mongoose.Types.ObjectId.isValid(opts.variantId)
+        ? new mongoose.Types.ObjectId(opts.variantId)
+        : null
+    const invFilter: Record<string, unknown> = {
+      tenantId: tenantOid,
+      productId: productOid,
+      branchId,
+    }
+    if (variantOid) invFilter.variantId = variantOid
+    else invFilter.$or = [{ variantId: null }, { variantId: { $exists: false } }]
+    const item = await InventoryItemModel.findOne(invFilter)
+    if (!item) {
+      const label = await productLabel(tenantId, productId)
+      const err = new Error(`No stock record for ${label} at branch "${branchId}"`)
+      ;(err as Error & { statusCode?: number }).statusCode = 404
+      throw err
+    }
+    const q = Math.abs(qty)
+    return stockService.applyMovement(tenantId, actorId, {
+      inventoryItemId: item._id.toString(),
+      type: "sale_return",
+      quantity: q,
+      reason: "Sale return",
+      referenceType: "refund",
+      referenceId: referenceId ?? "",
+      variantId: variantOid ? variantOid.toString() : undefined,
+      batchId: opts?.primaryBatchId,
+    })
+  },
+
+  /**
    * Moves quantity from one branch row to another (same product+variant). Not transactional on standalone MongoDB;
    * uses paired transfer_out / transfer_in movements with a shared reference id for reconciliation.
    */

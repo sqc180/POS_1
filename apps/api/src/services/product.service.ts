@@ -25,6 +25,7 @@ const toPublic = (p: ProductDoc) => ({
   mrp: p.mrp,
   trackStock: p.trackStock,
   brand: p.brand ?? "",
+  genericName: (p as { genericName?: string }).genericName?.trim() ? String((p as { genericName?: string }).genericName).trim() : "",
   unit: p.unit ?? "",
   imageUrl: p.imageUrl ?? "",
   status: p.status,
@@ -83,6 +84,7 @@ export const productService = {
         { name: new RegExp(q.trim(), "i") },
         { sku: new RegExp(q.trim(), "i") },
         { barcode: new RegExp(q.trim(), "i") },
+        { genericName: new RegExp(q.trim(), "i") },
       ]
     }
     const items = await ProductModel.find(filter).sort({ updatedAt: -1 }).limit(200)
@@ -110,7 +112,7 @@ export const productService = {
     if (opts.q?.trim()) {
       const esc = opts.q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
       const rx = new RegExp(esc, "i")
-      filter.$or = [{ name: rx }, { sku: rx }, { barcode: rx }, { internalCode: rx }, { hsnSac: rx }]
+      filter.$or = [{ name: rx }, { sku: rx }, { barcode: rx }, { internalCode: rx }, { hsnSac: rx }, { genericName: rx }]
     }
     if (opts.categoryId && mongoose.Types.ObjectId.isValid(opts.categoryId)) {
       filter.categoryId = new mongoose.Types.ObjectId(opts.categoryId)
@@ -152,6 +154,7 @@ export const productService = {
       mrp?: number
       trackStock?: boolean
       brand?: string
+      genericName?: string
       unit?: string
       imageUrl?: string
       variantMode?: VariantMode
@@ -201,6 +204,7 @@ export const productService = {
       mrp: input.mrp,
       trackStock: input.trackStock ?? true,
       brand: input.brand,
+      genericName: input.genericName?.trim() ? input.genericName.trim() : undefined,
       unit: input.unit,
       imageUrl: input.imageUrl,
       status: "active",
@@ -256,6 +260,7 @@ export const productService = {
       mrp: number
       trackStock: boolean
       brand: string
+      genericName: string
       unit: string
       imageUrl: string
       status: string
@@ -316,6 +321,8 @@ export const productService = {
     if (input.mrp !== undefined) p.mrp = input.mrp
     if (input.trackStock !== undefined) p.trackStock = input.trackStock
     if (input.brand !== undefined) p.brand = input.brand
+    if (input.genericName !== undefined)
+      (p as { genericName?: string }).genericName = input.genericName.trim() === "" ? undefined : input.genericName.trim()
     if (input.unit !== undefined) p.unit = input.unit
     if (input.imageUrl !== undefined) p.imageUrl = input.imageUrl
     if (input.status !== undefined) p.status = input.status as "active" | "inactive"

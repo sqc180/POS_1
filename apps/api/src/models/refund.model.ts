@@ -14,6 +14,17 @@ const refundSchema = new Schema(
     },
     reason: { type: String, trim: true, default: "" },
     providerRefundId: { type: String, trim: true, default: "" },
+    /** When set, refund is validated against invoice line items and restores stock on complete. */
+    returnLines: {
+      type: [
+        {
+          _id: false,
+          lineIndex: { type: Number, required: true, min: 0 },
+          qty: { type: Number, required: true, min: 0 },
+        },
+      ],
+      default: undefined,
+    },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
   },
   { timestamps: true },

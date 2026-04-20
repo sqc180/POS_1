@@ -12,7 +12,7 @@ export default function PharmacyPosShellPage() {
         description="Batch, expiry, and FEFO-aware selling — uses the same invoice completion path with pharmacy capability gates."
         actions={
           <Button type="button" variant="outline" size="sm" asChild>
-            <Link href="/pos">Standard POS</Link>
+            <Link href="/pos?dispense=1">Dispense POS</Link>
           </Button>
         }
       />
@@ -30,7 +30,7 @@ export default function PharmacyPosShellPage() {
         </CardHeader>
         <CardContent>
           <Button asChild>
-            <Link href="/pos">Open standard POS</Link>
+            <Link href="/pos?dispense=1">Open dispense POS</Link>
           </Button>
         </CardContent>
       </Card>

@@ -28,7 +28,7 @@ type Kpi = {
   hint?: string
 }
 
-const DASHBOARD_KPI_SKELETON_COUNT = 9
+const DASHBOARD_KPI_SKELETON_COUNT = 10
 
 const DashboardKpiSkeletonGrid = () => (
   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -93,6 +93,12 @@ export default function DashboardPage() {
       { label: "Draft invoices", value: summary.draftInvoices, href: "/invoices" },
       { label: "Completed invoices", value: summary.completedInvoices, href: "/invoices" },
       { label: "Pending refunds", value: summary.pendingRefunds, href: "/refunds" },
+      {
+        label: "Batches near expiry (60d)",
+        value: summary.batchesNearExpiry,
+        href: "/inventory",
+        hint: "Pharmacy / batch tracking",
+      },
     )
     return items
   }, [summary, me?.menu])

@@ -57,6 +57,7 @@ type Product = {
   status: string
   trackStock: boolean
   brand: string
+  genericName?: string
   unit: string
   variantMode?: "none" | "optional" | "required"
   batchTracking?: boolean
@@ -81,6 +82,7 @@ const schema = z.object({
   mrp: z.coerce.number().nonnegative().optional(),
   trackStock: z.boolean(),
   brand: z.string().optional(),
+  genericName: z.string().optional(),
   unit: z.string().optional(),
   status: z.enum(["active", "inactive"]).optional(),
   variantMode: z.enum(["none", "optional", "required"]),
@@ -160,6 +162,7 @@ export default function ProductDetailPage() {
       mrp: 0,
       trackStock: true,
       brand: "",
+      genericName: "",
       unit: "",
       status: "active",
       variantMode: "none",
@@ -182,6 +185,7 @@ export default function ProductDetailPage() {
       mrp: product.mrp ?? 0,
       trackStock: product.trackStock,
       brand: product.brand ?? "",
+      genericName: product.genericName ?? "",
       unit: product.unit ?? "",
       status: product.status === "inactive" ? "inactive" : "active",
       variantMode: product.variantMode ?? "none",
@@ -203,6 +207,7 @@ export default function ProductDetailPage() {
       mrp: values.mrp,
       trackStock: values.trackStock,
       brand: values.brand,
+      genericName: values.genericName,
       unit: values.unit,
       status: values.status,
       variantMode: values.variantMode,
@@ -470,6 +475,19 @@ export default function ProductDetailPage() {
                     <FormLabel>Brand</FormLabel>
                     <FormControl>
                       <Input {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="genericName"
+                render={({ field }) => (
+                  <FormItem className="sm:col-span-2">
+                    <FormLabel>Generic / pharmacological name</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="e.g. Paracetamol" autoComplete="off" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
